@@ -1,0 +1,181 @@
+import SwiftUI
+import UserNotifications
+
+@main
+struct PatchbayApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        Window("Patchbay", id: "main") {
+            ContentView()
+                .environment(appDelegate.store)
+                .frame(minWidth: 760, minHeight: 420)
+        }
+        .defaultSize(width: 1280, height: 800)
+        .commands { AppCommands(store: appDelegate.store) }
+
+        Settings {
+            SettingsView()
+                .environment(appDelegate.store)
+        }
+    }
+}
+
+private struct AppCommands: Commands {
+    let store: SessionStore
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Session…") { store.showNewSessionSheet = true }
+                .keyboardShortcut("n")
+            Button("New Shell Here") { store.newShellHere() }
+                .keyboardShortcut("t")
+            Divider()
+            Button("Close Session") {
+                if let session = store.selectedSession { store.confirmAndClose(session) }
+            }
+            .keyboardShortcut("w")
+            .disabled(store.selectedSession == nil)
+        }
+        CommandMenu("Pane") {
+            Button("Split Right") { store.split(.right) }
+                .keyboardShortcut("d")
+            Button("Split Down") { store.split(.bottom) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+            Divider()
+            Button("Next Pane") { store.focusAdjacentPane(1) }
+                .keyboardShortcut("]")
+            Button("Previous Pane") { store.focusAdjacentPane(-1) }
+                .keyboardShortcut("[")
+            Divider()
+            Button("Even Out Panes") { store.equalizePanes() }
+                .keyboardShortcut("=", modifiers: [.command, .control])
+                .disabled(store.paneCount < 2)
+            Button("Remove Pane") {
+                if let id = store.selectedID { store.closePane(id) }
+            }
+            .keyboardShortcut("w", modifiers: [.command, .option])
+            .disabled(store.paneCount < 2)
+        }
+        CommandMenu("Session") {
+            Button("Next Needing Attention") { store.selectNextNeedingAttention() }
+                .keyboardShortcut("j")
+            Button("Next Session") { store.selectAdjacent(1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Session") { store.selectAdjacent(-1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Divider()
+            Button("Rename…") { store.renamingID = store.selectedID }
+                .keyboardShortcut("r")
+                .disabled(store.selectedSession == nil)
+            Divider()
+            ForEach(0..<9, id: \.self) { index in
+                Button("Session \(index + 1)") { store.select(index: index) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+            }
+        }
+        CommandGroup(before: .toolbar) {
+            Button(store.showOverview ? "Hide Overview" : "Show Overview") { store.showOverview.toggle() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button(store.showHistory ? "Hide History" : "Show History") {
+                if store.showHistory { store.mode = .panes } else { store.showHistory(for: nil) }
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+            Divider()
+            Button("Bigger") { store.fontSize = min(store.fontSize + 1, 28) }
+                .keyboardShortcut("=")
+            Button("Smaller") { store.fontSize = max(store.fontSize - 1, 9) }
+                .keyboardShortcut("-")
+            Button("Actual Size") { store.fontSize = 13 }
+                .keyboardShortcut("0")
+            Divider()
+        }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// `NSApp.delegate` is SwiftUI's adaptor, not this object.
+    private(set) static weak var shared: AppDelegate?
+    let store = SessionStore()
+    weak var mainWindow: NSWindow? {
+        didSet {
+            guard mainWindow !== oldValue else { return }
+            firstResponderObservation = mainWindow?.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
+                MainActor.assumeIsolated { self?.store.terminalBecameFirstResponder(window.firstResponder) }
+            }
+        }
+    }
+    private var firstResponderObservation: NSKeyValueObservation?
+
+    override init() {
+        super.init()
+        Self.shared = self
+    }
+    private var keyMonitor: Any?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+            SessionStore.requestNotificationPermission()
+        }
+        // ⌘W closes the session, not the window, while the main window is in front.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "w",
+                  event.window != nil, event.window === self.mainWindow,
+                  event.window?.attachedSheet == nil,
+                  let session = self.store.selectedSession else { return event }
+            self.store.confirmAndClose(session)
+            return nil
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        store.appBecameActive()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let busy = store.sessions.filter(\.isBusy)
+        guard !busy.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit Patchbay?"
+        alert.informativeText = "\(busy.count == 1 ? "1 session is" : "\(busy.count) sessions are") still busy: "
+            + busy.map(\.displayName).joined(separator: ", ")
+            + ". Sessions reopen on the next launch, but running work stops."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.save()
+        for session in store.sessions { session.close() }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        true
+    }
+
+    // MARK: UNUserNotificationCenterDelegate
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            didReceive response: UNNotificationResponse) async {
+        let idString = response.notification.request.content.userInfo["session"] as? String
+        await MainActor.run {
+            NSApp.activate()
+            if let idString, let id = UUID(uuidString: idString), store.sessions.contains(where: { $0.id == id }) {
+                store.selectedID = id
+                store.showOverview = false
+            }
+            mainWindow?.makeKeyAndOrderFront(nil)
+        }
+    }
+}

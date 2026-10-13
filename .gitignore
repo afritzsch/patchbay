@@ -1,0 +1,6 @@
+.build/
+build/
+.swiftpm/
+CLAUDE.MD
+.DS_Store
+.claude/
