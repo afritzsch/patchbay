@@ -3,6 +3,8 @@
 A Mac app for running several Claude Code sessions (and Codex, Gemini, other agents and plain shells) side by side,
 with a sidebar that shows what each one is doing.
 
+![Patchbay with three Claude Code sessions (working, waiting for permission, done) and a dev server](docs/screenshot.png)
+
 - **Sidebar**: every session with its status (*Working · Bash*, *Waiting for agent*, *Needs your input*, *Done*,
   *Running `npm test`*, *Idle*) and how long it's been in that state. Agent sessions are titled by your last
   prompt (or the name you chose), with the question the agent is asking, if any, and the folder below. Drag to

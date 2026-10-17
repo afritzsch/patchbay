@@ -20,6 +20,19 @@ extension AppDelegate {
             guard let view = mainWindow?.contentView?.superview,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
+            // SwiftTerm paints its background on the layer, which cacheDisplay skips; redraw terminals over it.
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            for session in store.sessions where session.terminal.window != nil {
+                let terminal = session.terminal
+                guard let terminalRep = terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds) else { continue }
+                terminal.cacheDisplay(in: terminal.bounds, to: terminalRep)
+                var rect = view.convert(terminal.bounds, from: terminal)
+                if view.isFlipped { rect.origin.y = view.bounds.height - rect.maxY }
+                terminal.nativeBackgroundColor.setFill()
+                rect.fill()
+                terminalRep.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+            }
+            NSGraphicsContext.current = nil
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appending(path: "snapshot.png"))
         case "type":
             store.selectedSession?.terminal.send(txt: arg)
