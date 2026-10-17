@@ -26,6 +26,8 @@ final class SessionStore {
     @ObservationIgnored var dragged: DragPayload?
     /// Claude Code sessions running in other terminal apps.
     private(set) var externalSessions: [ExternalSession] = []
+    /// The file selected in the Changes tab, whose diff is shown beside the panes.
+    var selectedChange: ChangeSelection?
     /// What the main area shows.
     var mode: MainMode = .panes {
         didSet { if mode != .history { selectedSession?.markSeen() } }
