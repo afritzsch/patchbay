@@ -39,7 +39,10 @@ enum ClaudeTranscripts {
 /// Finds Claude Code sessions outside this app through the registry Claude keeps in `~/.claude/sessions`,
 /// one `<pid>.json` per running session.
 enum ExternalSessionScanner {
-    static let registry = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/sessions")
+    // The dev test copy (DevHooks.swift) gets its own, so it can't list or end the user's real sessions.
+    static let registry = ProcessInfo.processInfo.environment["PATCHBAY_DEV_DIR"]
+        .map { URL(fileURLWithPath: $0).appendingPathComponent("claude-sessions") }
+        ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/sessions")
 
     static func scan() -> [ExternalSession] {
         let files = (try? FileManager.default.contentsOfDirectory(at: registry, includingPropertiesForKeys: nil)) ?? []

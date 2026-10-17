@@ -43,7 +43,7 @@ enum Tool: String, CaseIterable {
             real Patchbay. A running test copy is quit first and keeps its sessions, so this also tests restoring them. \
             A fresh copy has no sessions; click_menu "New Shell Here" opens one.
             """
-        case .snapshot: "Returns a PNG of the test copy's window. Terminal text shows on a white background (a snapshot artifact)."
+        case .snapshot: "Returns a PNG of the test copy's window."
         case .typeText: "Types into the selected session of the test copy. End with \\n to press Return. A new shell needs about a second before it reads input."
         case .clickMenu: "Clicks a menu item of the test copy by exact title, e.g. \"Split Right\", \"New Shell Here\", \"Show Overview\"."
         case .logs: "Returns the end of the test copy's stdout and stderr (print and NSLog output)."
