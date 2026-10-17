@@ -101,17 +101,13 @@ struct NewSessionSheet: View {
 
     private func start() {
         guard let repo, newWorktree else { return open(directory) }
-        let (directory, branch, path) = (directory, branchName, repo.worktreePath(for: branchName))
+        let branch = branchName
         let base = repo.branches.contains(branch) ? nil : base
         isWorking = true
         Task {
-            error = await inBackground {
-                let error = Git.addWorktree(in: directory, branch: branch, base: base, at: path)
-                if error == nil { repo.setup?.copyFiles(from: repo.root, to: path) }
-                return error
-            }
+            error = await inBackground { repo.addWorktree(branch: branch, base: base) }
             isWorking = false
-            if error == nil { open(path, setup: repo.setup?.setup) }
+            if error == nil { open(repo.worktreePath(for: branch), setup: repo.setup?.setup) }
         }
     }
 

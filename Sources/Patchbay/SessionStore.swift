@@ -96,8 +96,10 @@ final class SessionStore {
 
     private(set) var recentDirectories: [String] = UserDefaults.standard.stringArray(forKey: Preferences.Keys.recentDirectories) ?? []
 
-    var selectedSession: TerminalSession? {
-        sessions.first { $0.id == selectedID }
+    var selectedSession: TerminalSession? { session(selectedID) }
+
+    func session(_ id: UUID?) -> TerminalSession? {
+        sessions.first { $0.id == id }
     }
 
     var attentionCount: Int {
@@ -131,21 +133,13 @@ final class SessionStore {
 
     // MARK: - Sessions
 
+    /// `restoring`: reopened from the last run, so it isn't focused, and isn't new to the recent folders or the history.
     @discardableResult
     func newSession(id: UUID = UUID(), directory: String, name: String? = nil, agent: Agent?, prompt: String? = nil,
-                    setup: String? = nil, resumeClaudeID: String? = nil, claudeArgs: [String] = [], select: Bool = true,
+                    setup: String? = nil, resumeClaudeID: String? = nil, claudeArgs: [String] = [], restoring: Bool = false,
                     splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
-        var command: String?
-        if let agent {
-            var parts = [agent.command]
-            if let resumeClaudeID { parts += ["--resume", ShellIntegration.quote(resumeClaudeID)] }
-            parts += claudeArgs.map(ShellIntegration.quote)
-            if let prompt, !prompt.isEmpty, agent.promptStyle != .unsupported {
-                if agent.promptStyle == .interactiveFlag { parts.append("-i") }
-                parts.append(ShellIntegration.quote(prompt))
-            }
-            command = parts.joined(separator: " ")
-        }
+        let resume = resumeClaudeID.map { ["--resume", $0] } ?? []
+        var command = agent?.commandLine(arguments: resume + claudeArgs, prompt: prompt)
         if let setup { command = [setup, command].compactMap { $0 }.joined(separator: " && ") }
         let dir = FileManager.default.fileExists(atPath: directory) ? directory : NSHomeDirectory()
         let session = TerminalSession(id: id, directory: dir, name: name, initialCommand: command, agent: agent,
@@ -168,7 +162,7 @@ final class SessionStore {
         if let target, let layout, layout.contains(target) {
             self.layout = layout.inserting(session.id, at: target, zone: zone)
         }
-        if select { // Not when restoring, which would reorder the recent folders.
+        if !restoring {
             rememberDirectory(dir)
             selectedID = session.id
             if mode == .history { mode = .panes }
@@ -180,7 +174,8 @@ final class SessionStore {
 
     func record(_ kind: HistoryKind, _ session: TerminalSession, text: String, exitCode: Int? = nil, duration: Double? = nil) {
         history.record(HistoryEntry(kind: kind, sessionID: session.id, sessionName: session.displayName,
-                                    directory: session.cwd, text: text, claudeSessionID: session.claudeSessionID,
+                                    directory: session.cwd, text: text, agent: session.agent?.name,
+                                    claudeSessionID: session.claudeSessionID,
                                     exitCode: exitCode, duration: duration))
     }
 
@@ -535,7 +530,7 @@ final class SessionStore {
             if agent == .claude, !resume { agent = nil }
             let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
             newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
-                       agent: agent, resumeClaudeID: claudeID, select: false).groupID = item.groupID
+                       agent: agent, resumeClaudeID: claudeID, restoring: true).groupID = item.groupID
         }
         groups = savedGroups
         tidyGroups()

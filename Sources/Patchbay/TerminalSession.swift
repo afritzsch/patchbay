@@ -165,22 +165,33 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
     }
 }
 
-/// Reads lines appended to a session's events file.
+/// Reads lines appended to a session's events file, and starts the file over once it has read `limit` bytes:
+/// hook payloads are up to 4 KB each, so a busy agent would otherwise fill the disk while the app runs.
 final class EventFileReader {
-    private let handle: FileHandle?
+    private let url: URL
+    private let limit: UInt64
+    private var handle: FileHandle?
+    /// The file before it was started over, kept for one more read: a writer may have opened it just before.
+    private var retired: FileHandle?
     private var partial = Data()
 
-    init(url: URL) {
+    init(url: URL, limit: UInt64 = 1 << 20) {
+        self.url = url
+        self.limit = limit
         handle = try? FileHandle(forReadingFrom: url)
     }
 
-    deinit {
-        try? handle?.close()
-    }
-
     func readNewLines() -> [String] {
-        guard let handle, let data = try? handle.readToEnd(), !data.isEmpty else { return [] }
-        partial.append(data)
+        partial += (try? retired?.readToEnd()) ?? Data()
+        retired = nil
+        partial += (try? handle?.readToEnd()) ?? Data()
+        // The writers (`>>` in the hook script and zsh) open the path for each line, so a new file at the path
+        // gets the next ones. O_CREAT without O_TRUNC keeps a line a writer already put in the new file.
+        if let handle, (try? handle.offset()) ?? 0 >= limit, unlink(url.path) == 0 {
+            retired = handle
+            let descriptor = open(url.path, O_RDONLY | O_CREAT, 0o644)
+            self.handle = descriptor < 0 ? nil : FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        }
         var lines: [String] = []
         while let newline = partial.firstIndex(of: UInt8(ascii: "\n")) {
             lines.append(String(decoding: partial[partial.startIndex..<newline], as: UTF8.self))

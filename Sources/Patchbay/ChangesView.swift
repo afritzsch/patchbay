@@ -145,7 +145,8 @@ struct ChangesView: View {
 
     /// Runs a git action off the main thread and shows its error if it failed; the store then refreshes the list.
     private func apply(_ work: @escaping @Sendable () -> String?) async {
+        let session = store.selectedSession // the focus may move while git runs
         error = await inBackground(work)
-        store.selectedSession?.gitStale = true
+        session?.gitStale = true
     }
 }

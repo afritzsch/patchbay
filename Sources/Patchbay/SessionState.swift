@@ -136,14 +136,14 @@ struct SessionState: Equatable {
             return effects + [.gitChanged]
         case .sessionStart:
             let json = HookPayload(payload)
-            claudeEvent()
+            hookEvent()
             claudeSessionID = json["session_id"] ?? claudeSessionID
             if let dir = json["cwd"] { cwd = dir }
             setStatus(.agentReady, at: now)
             return []
         case .userPromptSubmit:
             let json = HookPayload(payload)
-            claudeEvent()
+            hookEvent()
             var effects: [Effect] = []
             if let prompt = json["prompt"]?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
                 lastPrompt = prompt
@@ -156,27 +156,27 @@ struct SessionState: Equatable {
             setStatus(.agentWorking, at: now)
             return effects
         case .preToolUse:
-            claudeEvent()
+            hookEvent()
             currentTool = HookPayload(payload)["tool_name"]
             if ClaudeCode.isSubagentTool(currentTool) { runningSubagents += 1 }
             if status != .agentNeedsInput { setStatus(.agentWorking, at: now) }
             return []
         case .postToolUse:
-            claudeEvent()
+            hookEvent()
             if ClaudeCode.isSubagentTool(HookPayload(payload)["tool_name"]) { runningSubagents = max(0, runningSubagents - 1) }
             currentTool = nil
             asksApproval = false
             setStatus(.agentWorking, at: now)
             return [.gitChanged]
         case .permissionRequest:
-            claudeEvent()
+            hookEvent()
             asksApproval = true
             approvalRequest = ClaudeCode.requestSummary(HookPayload(payload))
             setStatus(.agentNeedsInput, at: now)
             return []
         case .notification:
             let json = HookPayload(payload)
-            claudeEvent()
+            hookEvent()
             if ClaudeCode.isIdleReminder(json) {
                 if status != .agentDone, status != .agentNeedsInput, runningSubagents == 0 { setStatus(.agentReady, at: now) }
                 return []
@@ -184,12 +184,12 @@ struct SessionState: Equatable {
             let text = (asksApproval ? approvalRequest.map { "Allow \($0)?" } : nil) ?? json["message"] ?? "Claude needs your attention"
             message = text
             setStatus(.agentNeedsInput, at: now)
-            return [.record(.claudeNeedsInput, text), .alert(text)]
+            return [.record(.agentNeedsInput, text), .alert(text)]
         case .stop:
-            claudeEvent()
+            hookEvent()
             clearTurn()
             setStatus(.agentDone, at: now)
-            var effects: [Effect] = [.record(.claudeFinished, lastPrompt ?? "", duration: promptStarted.map { now.timeIntervalSince($0) }),
+            var effects: [Effect] = [.record(.agentFinished, lastPrompt ?? "", duration: promptStarted.map { now.timeIntervalSince($0) }),
                                      .gitChanged]
             promptStarted = nil
             if !visible() {
@@ -204,9 +204,10 @@ struct SessionState: Equatable {
         }
     }
 
-    /// A Claude Code hook event: Claude is running, and its hooks (not the shell's command line) now track it.
-    private mutating func claudeEvent() {
-        agent = .claude
+    /// A hook event: an agent with hooks is running, and its hooks (not the shell's command line) now track it.
+    /// Only Claude's hooks are installed, so it's Claude unless the command line started another agent with hooks.
+    private mutating func hookEvent() {
+        if agent?.hasHooks != true { agent = .claude }
         command = nil
     }
 
