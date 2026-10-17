@@ -163,9 +163,17 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            StatusIcon(session: session)
-                .font(.system(size: 13))
-                .padding(.top, 1)
+            VStack(spacing: 2) {
+                StatusIcon(session: session)
+                    .font(.system(size: 13))
+                    .padding(.top, 1)
+                // The ⌘1–9 shortcut.
+                if index < 9 {
+                    Text("\(index + 1)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(session.rowTitle)
