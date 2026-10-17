@@ -5,6 +5,8 @@ struct HistoryView: View {
     @Environment(SessionStore.self) private var store
     @State private var search = ""
     @State private var groups = Set(HistoryGroup.allCases)
+    /// Rows drawn at most: a list of all 20,000 entries would make every search keystroke slow.
+    private static let shownLimit = 2000
 
     var body: some View {
         @Bindable var store = store
@@ -23,12 +25,17 @@ struct HistoryView: View {
                 .frame(maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(Self.days(entries), id: \.day) { day in
+                    ForEach(Self.days(Array(entries.prefix(Self.shownLimit))), id: \.day) { day in
                         Section(Self.dayTitle(day.day)) {
                             ForEach(day.entries) { entry in
                                 HistoryRow(entry: entry, session: store.sessions.first { $0.id == entry.sessionID })
                             }
                         }
+                    }
+                    if entries.count > Self.shownLimit {
+                        Text("Showing the latest \(Self.shownLimit). Search or filter to find older entries.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .listStyle(.inset)
@@ -224,10 +231,7 @@ private struct HistoryRow: View {
                 session.terminal.send(txt: entry.text + "\n")
             }
         }
-        Button("Copy") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(entry.text.isEmpty ? entry.directory : entry.text, forType: .string)
-        }
+        Button("Copy") { copyToPasteboard(entry.text.isEmpty ? entry.directory : entry.text) }
         Divider()
         Button("Show Only This Session") { store.historySessionFilter = entry.sessionID }
         Button("New Shell in This Folder") { store.newSession(directory: entry.directory, agent: nil) }
@@ -235,9 +239,7 @@ private struct HistoryRow: View {
     }
 
     private func goToSession() {
-        guard let session else { return }
-        store.selectedID = session.id
-        store.mode = .panes
+        if let session { store.show(session.id) }
     }
 
     static func duration(_ seconds: Double) -> String {

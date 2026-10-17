@@ -26,13 +26,16 @@ struct Agent: Identifiable, Codable, Hashable {
     /// Agents added in Settings, stored as JSON in UserDefaults.
     static var custom: [Agent] {
         get {
-            UserDefaults.standard.data(forKey: "customAgents")
+            UserDefaults.standard.data(forKey: Preferences.Keys.customAgents)
                 .flatMap { try? JSONDecoder().decode([Agent].self, from: $0) } ?? []
         }
-        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: "customAgents") }
+        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Preferences.Keys.customAgents) }
     }
 
     static var all: [Agent] { builtIn + custom }
+
+    /// Reports its status through Claude Code hooks. Other agents count as working while their output flows.
+    var hasHooks: Bool { id == Agent.claude.id }
 
     static func named(_ id: String) -> Agent? {
         all.first { $0.id == id }

@@ -47,17 +47,15 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
 final class HistoryStore {
     private(set) var entries: [HistoryEntry] = []
 
-    static let file = ShellIntegration.supportDir.appendingPathComponent("history.jsonl")
+    nonisolated static let file = ShellIntegration.supportDir.appendingPathComponent("history.jsonl")
     static let maxEntries = 20_000
-
-    enum Keys {
-        static let retentionDays = "historyRetentionDays"
-    }
+    /// Writes to the file, in order and off the main thread.
+    private static let disk = DispatchQueue(label: "app.patchbay.history")
 
     /// 0 keeps everything.
-    var retentionDays: Int = UserDefaults.standard.object(forKey: Keys.retentionDays) as? Int ?? 90 {
+    var retentionDays = UserDefaults.standard.integer(forKey: Preferences.Keys.historyRetentionDays) {
         didSet {
-            UserDefaults.standard.set(retentionDays, forKey: Keys.retentionDays)
+            UserDefaults.standard.set(retentionDays, forKey: Preferences.Keys.historyRetentionDays)
             prune()
         }
     }
@@ -68,19 +66,25 @@ final class HistoryStore {
 
     func record(_ entry: HistoryEntry) {
         entries.append(entry)
-        guard let data = try? Self.encoder.encode(entry) else { return }
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: Self.file.path) { fm.createFile(atPath: Self.file.path, contents: nil) }
-        guard let handle = try? FileHandle(forWritingTo: Self.file) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data + Data("\n".utf8))
+        Self.disk.async {
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: Self.file.path) { fm.createFile(atPath: Self.file.path, contents: nil) }
+            guard let handle = try? FileHandle(forWritingTo: Self.file) else { return }
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: Self.lines([entry]))
+        }
         if entries.count > Self.maxEntries + 1000 { prune() }
     }
 
     func clear() {
         entries = []
-        try? FileManager.default.removeItem(at: Self.file)
+        Self.disk.async { try? FileManager.default.removeItem(at: Self.file) }
+    }
+
+    /// Waits for pending writes, before the app quits.
+    func flush() {
+        Self.disk.sync {}
     }
 
     private func load() {
@@ -99,13 +103,18 @@ final class HistoryStore {
         if kept.count > Self.maxEntries { kept.removeFirst(kept.count - Self.maxEntries) }
         guard kept.count != entries.count else { return }
         entries = kept
-        let lines = kept.compactMap { try? Self.encoder.encode($0) }
-        var data = Data()
-        for line in lines { data += line + Data("\n".utf8) }
-        try? data.write(to: Self.file, options: .atomic)
+        Self.disk.async { [kept] in try? Self.lines(kept).write(to: Self.file, options: .atomic) }
     }
 
-    private static let encoder: JSONEncoder = {
+    private nonisolated static func lines(_ entries: [HistoryEntry]) -> Data {
+        var data = Data()
+        for entry in entries {
+            if let line = try? encoder.encode(entry) { data += line + Data("\n".utf8) }
+        }
+        return data
+    }
+
+    private nonisolated static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder

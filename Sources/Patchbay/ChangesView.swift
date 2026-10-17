@@ -3,11 +3,11 @@ import SwiftUI
 /// Source control for the focused session's repository, like VS Code's: staged and unstaged files, and a commit box.
 struct ChangesView: View {
     @Environment(SessionStore.self) private var store
-    @State private var changes: [GitChange] = []
     @State private var message = ""
     @State private var error: String?
     @State private var discarding: GitChange?
 
+    private var changes: [GitChange] { store.selectedSession?.git?.changes ?? [] }
     private var staged: [GitChange] { changes.filter(\.isStaged) }
     private var unstaged: [GitChange] { changes.filter(\.isUnstaged) }
 
@@ -41,15 +41,19 @@ struct ChangesView: View {
                     if changes.isEmpty { ContentUnavailableView("No Changes", systemImage: "checkmark.circle") }
                 }
             }
-            .task(id: git.root) { await refreshLoop(git.root) }
-            .onDisappear { store.selectedChange = nil }
+            .onChange(of: git.root) { store.selectedChange = nil }
+            .onAppear { store.watchingChanges = true }
+            .onDisappear {
+                store.watchingChanges = false
+                store.selectedChange = nil
+            }
             .confirmationDialog(
                 "Discard changes to \(discarding?.path ?? "")?",
                 isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }),
                 presenting: discarding
             ) { change in
                 Button("Discard Changes", role: .destructive) {
-                    Task { await apply(in: git.root) { Git.discard(change, in: git.root) } }
+                    Task { await apply { Git.discard(change, in: git.root) } }
                 }
             } message: { _ in
                 Text("This can't be undone.")
@@ -69,7 +73,7 @@ struct ChangesView: View {
             Button {
                 let text = message
                 Task {
-                    await apply(in: git.root) { Git.commit(text, in: git.root) }
+                    await apply { Git.commit(text, in: git.root) }
                     if error == nil { message = "" }
                 }
             } label: {
@@ -96,9 +100,9 @@ struct ChangesView: View {
             Text(title)
             Text("\(count)").monospacedDigit()
             Spacer()
-            if let root = store.selectedSession?.git?.root {
+            if store.selectedSession?.git != nil {
                 Button {
-                    Task { await apply(in: root, action) }
+                    Task { await apply(action) }
                 } label: {
                     Image(systemName: icon)
                 }
@@ -135,7 +139,7 @@ struct ChangesView: View {
             }
             Button {
                 Task {
-                    await apply(in: root) { staged ? Git.unstage([change.path], in: root) : Git.stage([change.path], in: root) }
+                    await apply { staged ? Git.unstage([change.path], in: root) : Git.stage([change.path], in: root) }
                 }
             } label: {
                 Image(systemName: staged ? "minus" : "plus")
@@ -156,25 +160,9 @@ struct ChangesView: View {
         }
     }
 
-    private func refreshLoop(_ root: String) async {
-        changes = []
-        store.selectedChange = nil
-        while !Task.isCancelled {
-            await reload(root)
-            try? await Task.sleep(for: .seconds(2))
-        }
-    }
-
-    private func reload(_ root: String) async {
-        if let fresh = await Task.detached(operation: { Git.changes(at: root) }).value, fresh != changes {
-            changes = fresh
-        }
-    }
-
-    /// Runs a git action off the main thread, shows its error if it failed, and refreshes the list.
-    private func apply(in root: String, _ work: @escaping @Sendable () -> String?) async {
-        error = await Task.detached(operation: work).value
-        await reload(root)
+    /// Runs a git action off the main thread and shows its error if it failed; the store then refreshes the list.
+    private func apply(_ work: @escaping @Sendable () -> String?) async {
+        error = await inBackground(work)
         store.selectedSession?.gitStale = true
     }
 }

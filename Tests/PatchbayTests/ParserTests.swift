@@ -1,0 +1,89 @@
+import AppKit
+import Testing
+@testable import Patchbay
+
+struct GitParserTests {
+    @Test func status() {
+        let status = [
+            "# branch.oid 1234567890abcdef",
+            "# branch.head main",
+            "# branch.upstream origin/main",
+            "# branch.ab +2 -1",
+            "1 .M N... 100644 100644 100644 aaa bbb Sources/a file.swift",
+            "2 R. N... 100644 100644 100644 aaa bbb R100 new.swift", "old.swift",
+            "u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.txt",
+            "? notes.md",
+        ].joined(separator: "\0") + "\0"
+        let info = Git.parse(status: status, root: "/repo")
+        #expect(info.branch == "main")
+        #expect(info.ahead == 2)
+        #expect(info.behind == 1)
+        #expect(info.changes == [
+            GitChange(index: " ", worktree: "M", path: "Sources/a file.swift"),
+            GitChange(index: "R", worktree: " ", path: "new.swift"),
+            GitChange(index: "U", worktree: "U", path: "conflict.txt"),
+            GitChange(index: "?", worktree: "?", path: "notes.md"),
+        ])
+        #expect(info.changes.map(\.isStaged) == [false, true, false, false])
+        #expect(info.changes.map(\.isUnstaged) == [true, false, true, true])
+    }
+
+    @Test func detachedHead() {
+        let info = Git.parse(status: "# branch.oid abcdef123456\0# branch.head (detached)\0", root: "/repo")
+        #expect(info.branch == "abcdef1")
+        #expect(info.changed == 0)
+    }
+
+    @Test func diff() {
+        let diff = """
+        diff --git a/x b/x
+        index 1111111..2222222 100644
+        --- a/x
+        +++ b/x
+        @@ -3,2 +3,3 @@ func
+         keep
+        -old
+        +new
+        +added
+        """
+        let lines = Git.parseDiff(diff)
+        #expect(lines.map(\.kind) == [.hunk, .context, .removed, .added, .added])
+        #expect(lines.map(\.old) == [nil, 3, 4, nil, nil])
+        #expect(lines.map(\.new) == [nil, 3, nil, 4, 5])
+        #expect(lines[2].text == "old")
+    }
+}
+
+struct SmallParserTests {
+    @Test func carriedArguments() {
+        let args = ["--model", "opus", "--resume", "x", "--verbose", "--effort=high", "-c"]
+        #expect(ExternalSessionScanner.carriedArgs(from: args) == ["--model", "opus", "--verbose", "--effort=high"])
+    }
+
+    @Test func runningAgent() {
+        #expect(Agent.running("claude --resume x") == .claude)
+        #expect(Agent.running("claudette") == nil)
+        #expect(Agent.running("codex")?.id == "codex")
+        #expect(Agent.claude.hasHooks)
+        #expect(Agent.running("gemini")?.hasHooks == false)
+    }
+
+    @Test func shellEscaping() {
+        #expect(TerminalHostView.shellEscaped("/a b/it's") == #"/a\ b/it\'s"#)
+        #expect(ShellIntegration.quote("it's") == #"'it'\''s'"#)
+    }
+
+    @Test func dropZones() {
+        let bounds = NSRect(x: 0, y: 0, width: 100, height: 100)
+        #expect(TerminalHostView.zone(at: NSPoint(x: 5, y: 50), in: bounds) == .left)
+        #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 50), in: bounds) == .center)
+        #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 95), in: bounds) == .top) // AppKit's y grows upwards
+        #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 5), in: bounds) == .bottom)
+    }
+
+    @Test func elapsedTime() {
+        #expect(ElapsedText.format(42) == "42s")
+        #expect(ElapsedText.format(150) == "2m")
+        #expect(ElapsedText.format(7200) == "2h")
+    }
+}

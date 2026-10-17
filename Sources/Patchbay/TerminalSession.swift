@@ -1,92 +1,46 @@
 import AppKit
 import SwiftTerm
 
-enum SessionStatus: Equatable {
-    case starting
-    /// Shell at its prompt.
-    case idle
-    /// Shell running a command.
-    case running(String)
-    /// An agent is open and waiting for a prompt.
-    case agentReady
-    case agentWorking
-    /// An agent is blocked on the user (permission prompt, question).
-    case agentNeedsInput
-    /// An agent finished its turn.
-    case agentDone
-    case exited(Int32?)
-}
-
 /// One terminal: a shell in a pseudo-terminal, plus what the shell integration and the agent's hooks report.
-@MainActor @Observable
+/// The state's properties read as the session's own (`session.status`) through `@dynamicMemberLookup`.
+@MainActor @Observable @dynamicMemberLookup
 final class TerminalSession: Identifiable {
     let id: UUID
     var customName: String?
-    var cwd: String
     /// The terminal title; Claude Code sets it to a summary of the current task.
     var title = ""
-    private(set) var status: SessionStatus = .starting
-    private(set) var statusSince = Date()
-    /// The agent running in the foreground, or nil for a plain shell.
-    private(set) var agent: Agent?
-    var isClaude: Bool { agent == .claude }
-    private(set) var claudeSessionID: String?
-    private(set) var lastPrompt: String?
-    /// Latest Claude notification, or what a finished command did.
-    private(set) var message: String?
-    private(set) var currentTool: String?
-    /// Subagent calls (Task/Agent tool) that have started but not finished.
-    private(set) var runningSubagents = 0
-    /// Something happened the user hasn't looked at yet (Claude finished, a long command ended, a bell).
-    var unseen = false
+    private(set) var state: SessionState
     /// The working tree's git state; nil outside a repository.
     var git: GitInfo?
 
     @ObservationIgnored let terminal: SessionTerminalView
-    @ObservationIgnored private(set) var lastOutput = Date()
+    @ObservationIgnored private var lastOutput = Date()
+    @ObservationIgnored private var lastInput = Date.distantPast
     @ObservationIgnored private var eventReader: EventFileReader?
+    /// For shells without the integration: typed in once the shell first prints something.
+    @ObservationIgnored private var pendingCommand: String?
     /// Called with a short description when something happens that deserves a notification.
     @ObservationIgnored var onAlert: ((TerminalSession, String) -> Void)?
     /// Called for everything worth keeping in the activity history.
     @ObservationIgnored var onRecord: ((TerminalSession, HistoryKind, String, _ exitCode: Int?, _ duration: Double?) -> Void)?
-    @ObservationIgnored private var promptStarted: Date?
     /// Git state may have changed (a command finished, Claude's turn ended); the store refreshes it soon.
     @ObservationIgnored var gitStale = true
-    /// The foreground command line and when it started, from `ShellExec` until `ShellPrompt`.
-    @ObservationIgnored private var command: (line: String, started: Date)?
-    @ObservationIgnored private var lastInput = Date.distantPast
     /// True while the user is looking at this session.
     @ObservationIgnored var isVisible: () -> Bool = { false }
 
+    subscript<T>(dynamicMember keyPath: KeyPath<SessionState, T>) -> T { state[keyPath: keyPath] }
+
     var displayName: String {
         if let customName, !customName.isEmpty { return customName }
-        return (cwd as NSString).lastPathComponent.isEmpty ? cwd : (cwd as NSString).lastPathComponent
+        let folder = (state.cwd as NSString).lastPathComponent
+        return folder.isEmpty ? state.cwd : folder
     }
 
-    var needsAttention: Bool {
-        status == .agentNeedsInput || unseen
-    }
-
-    var isBusy: Bool {
-        switch status {
-        case .running, .agentWorking, .agentNeedsInput: true
-        default: false
-        }
-    }
-
-    var isAlive: Bool {
-        if case .exited = status { return false }
-        return true
-    }
-
-    /// A session started with an agent counts as running it before its first event, so an early save keeps it.
     init(id: UUID = UUID(), directory: String, name: String?, initialCommand: String?, agent: Agent? = nil,
          claudeSessionID: String? = nil, fontSize: CGFloat) {
         self.id = id
-        self.cwd = directory
         self.customName = name
-        self.agent = agent
-        self.claudeSessionID = claudeSessionID
+        state = SessionState(cwd: directory, agent: agent, claudeSessionID: claudeSessionID)
         terminal = SessionTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
         terminal.applyStyle(fontSize: fontSize)
         terminal.processDelegate = self
@@ -99,6 +53,7 @@ final class TerminalSession: Identifiable {
         eventReader = EventFileReader(url: eventsFile)
 
         let shell = ShellIntegration.userShell
+        if !ShellIntegration.shellIsZsh { pendingCommand = initialCommand }
         terminal.startProcess(
             executable: shell,
             args: [],
@@ -106,12 +61,6 @@ final class TerminalSession: Identifiable {
             execName: "-" + (shell as NSString).lastPathComponent,
             currentDirectory: directory
         )
-        if let initialCommand, !ShellIntegration.shellIsZsh {
-            // Other shells have no integration; type the command once the shell is up.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.terminal.send(txt: initialCommand + "\n")
-            }
-        }
     }
 
     func close() {
@@ -123,12 +72,22 @@ final class TerminalSession: Identifiable {
         try? FileManager.default.removeItem(at: ShellIntegration.eventsFile(for: id))
     }
 
-    // MARK: - Status
+    /// Changes the state, telling observers only when something actually changed: views redraw on every write.
+    private func update<Result>(_ change: (inout SessionState) -> Result) -> Result {
+        var next = state
+        let result = change(&next)
+        if next != state { state = next }
+        return result
+    }
 
-    private func setStatus(_ new: SessionStatus) {
-        guard new != status else { return }
-        status = new
-        statusSince = Date()
+    private func perform(_ effects: [SessionState.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .record(let kind, let text, let exitCode, let duration): onRecord?(self, kind, text, exitCode, duration)
+            case .alert(let text): onAlert?(self, text)
+            case .gitChanged: gitStale = true
+            }
+        }
     }
 
     /// Reads new events from the shell integration and Claude Code hooks. Called periodically.
@@ -136,150 +95,36 @@ final class TerminalSession: Identifiable {
         guard let eventReader else { return }
         for line in eventReader.readNewLines() {
             let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-            guard let event = parts.first.map(String.init) else { continue }
-            handle(event: event, payload: parts.count > 1 ? String(parts[1]) : "")
+            guard let event = parts.first.flatMap({ SessionEvent(rawValue: String($0)) }) else { continue }
+            let payload = parts.count > 1 ? String(parts[1]) : ""
+            perform(update { $0.apply(event, payload: payload, visible: isVisible()) })
         }
     }
 
-    private func handle(event: String, payload: String) {
-        switch event {
-        case "ShellExec":
-            command = (payload, Date())
-            lastOutput = Date() // So a quiet agent isn't taken for idle right away.
-            agent = Agent.running(payload)
-            // Claude reports its status through hooks; other agents have none, so they count as working
-            // while their output flows (see outputReceived and checkForSilence).
-            setStatus(agent == nil || isClaude ? .running(payload) : .agentWorking)
-            message = nil
-        case "ShellPrompt":
-            let fields = payload.split(separator: "\t", maxSplits: 1).map(String.init)
-            if fields.count == 2 { cwd = fields[1] }
-            if let command {
-                let exitCode = fields.first ?? "0"
-                let duration = Date().timeIntervalSince(command.started)
-                onRecord?(self, .command, command.line, Int(exitCode), duration)
-                if duration > 10, !isVisible(), Agent.running(command.line) != .claude {
-                    let text = exitCode == "0" ? "Finished: \(command.line)" : "Failed (exit \(exitCode)): \(command.line)"
-                    message = text
-                    unseen = true
-                    onAlert?(self, text)
-                }
-            }
-            command = nil
-            agent = nil
-            currentTool = nil
-            gitStale = true
-            setStatus(.idle)
-        case "SessionStart":
-            let json = HookPayload(payload)
-            claudeEvent()
-            claudeSessionID = json["session_id"] ?? claudeSessionID
-            if let dir = json["cwd"] { cwd = dir }
-            setStatus(.agentReady)
-        case "UserPromptSubmit":
-            let json = HookPayload(payload)
-            claudeEvent()
-            if let prompt = json["prompt"]?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
-                lastPrompt = prompt
-                claudeSessionID = json["session_id"] ?? claudeSessionID
-                onRecord?(self, .prompt, prompt, nil, nil)
-            }
-            promptStarted = Date()
-            message = nil
-            currentTool = nil
-            runningSubagents = 0
-            unseen = false
-            setStatus(.agentWorking)
-        case "PreToolUse":
-            claudeEvent()
-            currentTool = HookPayload(payload)["tool_name"]
-            if Self.isSubagentTool(currentTool) { runningSubagents += 1 }
-            if status != .agentNeedsInput { setStatus(.agentWorking) }
-        case "PostToolUse":
-            claudeEvent()
-            if Self.isSubagentTool(HookPayload(payload)["tool_name"]) { runningSubagents = max(0, runningSubagents - 1) }
-            currentTool = nil
-            gitStale = true
-            setStatus(.agentWorking)
-        case "Notification":
-            claudeEvent()
-            let text = HookPayload(payload)["message"] ?? "Claude needs your attention"
-            if text.localizedCaseInsensitiveContains("waiting for your input") {
-                // The idle reminder after a finished turn, not a question.
-                if status != .agentDone, status != .agentNeedsInput, runningSubagents == 0 { setStatus(.agentReady) }
-                return
-            }
-            message = text
-            setStatus(.agentNeedsInput)
-            onRecord?(self, .claudeNeedsInput, text, nil, nil)
-            onAlert?(self, text)
-        case "Stop":
-            claudeEvent()
-            currentTool = nil
-            runningSubagents = 0
-            message = nil
-            gitStale = true
-            setStatus(.agentDone)
-            onRecord?(self, .claudeFinished, lastPrompt ?? "", nil, promptStarted.map { Date().timeIntervalSince($0) })
-            promptStarted = nil
-            if !isVisible() {
-                unseen = true
-                onAlert?(self, lastPrompt.map { "Done: \($0)" } ?? "Claude finished")
-            }
-        case "SessionEnd":
-            agent = nil
-            currentTool = nil
-            runningSubagents = 0
-            setStatus(.idle)
-        default:
-            break
-        }
-    }
-
-    private static func isSubagentTool(_ name: String?) -> Bool { name == "Task" || name == "Agent" }
-
-    /// A Claude Code hook event: Claude is running, and its hooks (not the shell's command line) now track it.
-    private func claudeEvent() {
-        agent = .claude
-        command = nil
-    }
-
-    /// Claude's spinner redraws the screen continuously while it works, so a "working" session that has
-    /// been silent for a while was interrupted (Esc/Ctrl-C fire no hook) and is waiting for the user.
     func checkForSilence() {
-        if status == .agentWorking, runningSubagents == 0, Date().timeIntervalSince(lastOutput) > 8 {
-            currentTool = nil
-            setStatus(.agentReady)
-        }
+        update { $0.checkForSilence(lastOutput: lastOutput) }
     }
 
     func markSeen() {
-        if unseen { unseen = false }
+        update { $0.unseen = false }
     }
 
     private func outputReceived() {
         lastOutput = Date()
-        // Without hooks, output that isn't the echo of typing means the agent is working again.
-        if status == .agentReady, agent != nil, !isClaude, Date().timeIntervalSince(lastInput) > 0.5 {
-            setStatus(.agentWorking)
+        if let pendingCommand {
+            self.pendingCommand = nil
+            terminal.send(txt: pendingCommand + "\n")
         }
+        update { $0.outputReceived(sinceInput: Date().timeIntervalSince(lastInput)) }
     }
 
     private func inputSent() {
         lastInput = Date()
-        // Answering a permission prompt: either a tool runs (PostToolUse follows) or Claude stops,
-        // which the silence check picks up.
-        if status == .agentNeedsInput {
-            message = nil
-            setStatus(.agentWorking)
-        }
+        update { $0.inputSent() }
     }
 
     private func bellRang() {
-        guard !isVisible(), !isClaude else { return } // Claude's own bell duplicates its Notification hook.
-        unseen = true
-        message = "Bell"
-        onAlert?(self, "Bell")
+        perform(update { $0.bellRang(visible: isVisible()) })
     }
 }
 
@@ -287,52 +132,17 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-        // Claude Code prefixes its title with a spinner glyph and uses "Claude Code" when it has no task yet.
+        // Claude Code prefixes its title with a spinner glyph.
         var cleaned = Substring(title)
         while let first = cleaned.first, !first.isLetter, !first.isNumber { cleaned = cleaned.dropFirst() }
         let text = cleaned.trimmingCharacters(in: .whitespaces)
-        self.title = text == "Claude Code" ? "" : text
+        self.title = text == ClaudeCode.untitled ? "" : text
     }
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
-        agent = nil
-        currentTool = nil
-        setStatus(.exited(exitCode))
-    }
-}
-
-/// Fields of a Claude Code hook payload. The hook script truncates long payloads, so when the JSON
-/// doesn't parse, string fields are picked out with a pattern instead.
-struct HookPayload {
-    private var fields: [String: String] = [:]
-    private let raw: String
-
-    init(_ raw: String) {
-        self.raw = raw
-        if let data = raw.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for (key, value) in object {
-                if let s = value as? String { fields[key] = s }
-            }
-        }
-    }
-
-    subscript(key: String) -> String? {
-        if let value = fields[key] { return value }
-        guard let regex = try? NSRegularExpression(pattern: "\"\(key)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)")
-        else { return nil }
-        let range = NSRange(raw.startIndex..., in: raw)
-        guard let match = regex.firstMatch(in: raw, range: range),
-              let valueRange = Range(match.range(at: 1), in: raw) else { return nil }
-        let escaped = String(raw[valueRange])
-        // Decode JSON escapes by parsing the value as a complete string; a cut-off escape falls back to raw.
-        if let data = "\"\(escaped)\"".data(using: .utf8),
-           let decoded = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) as? String {
-            return decoded
-        }
-        return escaped
+        update { $0.processExited(exitCode) }
     }
 }
 

@@ -82,11 +82,11 @@ private struct AppCommands: Commands {
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
             Divider()
-            Button("Bigger") { store.fontSize = min(store.fontSize + 1, 28) }
+            Button("Bigger") { store.fontSize = min(store.fontSize + 1, Preferences.fontSizes.upperBound) }
                 .keyboardShortcut("=")
-            Button("Smaller") { store.fontSize = max(store.fontSize - 1, 9) }
+            Button("Smaller") { store.fontSize = max(store.fontSize - 1, Preferences.fontSizes.lowerBound) }
                 .keyboardShortcut("-")
-            Button("Actual Size") { store.fontSize = 13 }
+            Button("Actual Size") { store.fontSize = Preferences.defaultFontSize }
                 .keyboardShortcut("0")
             Divider()
         }
@@ -97,7 +97,7 @@ private struct AppCommands: Commands {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     /// `NSApp.delegate` is SwiftUI's adaptor, not this object.
     private(set) static weak var shared: AppDelegate?
-    let store = SessionStore()
+    let store: SessionStore
     weak var mainWindow: NSWindow? {
         didSet {
             guard mainWindow !== oldValue else { return }
@@ -109,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var firstResponderObservation: NSKeyValueObservation?
 
     override init() {
+        Preferences.register()
+        store = SessionStore()
         super.init()
         Self.shared = self
     }
@@ -141,18 +143,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let busy = store.sessions.filter(\.isBusy)
         guard !busy.isEmpty else { return .terminateNow }
-        let alert = NSAlert()
-        alert.messageText = "Quit Patchbay?"
-        alert.informativeText = "\(busy.count == 1 ? "1 session is" : "\(busy.count) sessions are") still busy: "
+        let info = "\(busy.count == 1 ? "1 session is" : "\(busy.count) sessions are") still busy: "
             + busy.map(\.displayName).joined(separator: ", ")
             + ". Sessions reopen on the next launch, but running work stops."
-        alert.addButton(withTitle: "Quit")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        return Ask.confirm("Quit Patchbay?", info, action: "Quit") ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         store.save()
+        store.history.flush()
         for session in store.sessions { session.close() }
     }
 
@@ -173,8 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         await MainActor.run {
             NSApp.activate()
             if let idString, let id = UUID(uuidString: idString), store.sessions.contains(where: { $0.id == id }) {
-                store.selectedID = id
-                store.showOverview = false
+                store.show(id)
             }
             mainWindow?.makeKeyAndOrderFront(nil)
         }

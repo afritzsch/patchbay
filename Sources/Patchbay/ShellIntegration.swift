@@ -20,8 +20,6 @@ enum ShellIntegration {
     /// Claude Code status line (configured in ~/.claude/settings.json); also saves plan usage for the app.
     static let statusLineScript = supportDir.appendingPathComponent("statusline.sh")
 
-    static let hookEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"]
-
     /// The user's login shell, falling back to zsh.
     static let userShell: String = {
         if let pw = getpwuid(getuid()), let shell = pw.pointee.pw_shell {
@@ -50,10 +48,10 @@ enum ShellIntegration {
 
         let command = "/bin/sh '\(hookScript.path)'"
         var hooks: [String: Any] = [:]
-        for event in hookEvents {
-            var entry: [String: Any] = ["hooks": [["type": "command", "command": "\(command) \(event)", "timeout": 5]]]
-            if event == "PreToolUse" || event == "PostToolUse" { entry["matcher"] = "*" }
-            hooks[event] = [entry]
+        for event in SessionEvent.hooks {
+            var entry: [String: Any] = ["hooks": [["type": "command", "command": "\(command) \(event.rawValue)", "timeout": 5]]]
+            if event == .preToolUse || event == .postToolUse { entry["matcher"] = "*" }
+            hooks[event.rawValue] = [entry]
         }
         let settings = try JSONSerialization.data(withJSONObject: ["hooks": hooks], options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try settings.write(to: claudeSettings, options: .atomic)
@@ -71,11 +69,7 @@ enum ShellIntegration {
     static func environment(sessionID: UUID, initialCommand: String?) -> [String] {
         var env = ProcessInfo.processInfo.environment
         // Leftovers when the app itself was started from a terminal or from inside Claude Code.
-        let claudeSessionKeys = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_ENTRYPOINT",
-                                 "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ID",
-                                 "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED",
-                                 "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"]
-        for key in claudeSessionKeys + ["TERM_SESSION_ID", "TERM_PROGRAM_VERSION", "ITERM_SESSION_ID",
+        for key in ClaudeCode.environmentKeys + ["TERM_SESSION_ID", "TERM_PROGRAM_VERSION", "ITERM_SESSION_ID",
                                          "ITERM_PROFILE", "TMUX", "TMUX_PANE", "STY"] {
             env.removeValue(forKey: key)
         }
@@ -169,6 +163,7 @@ enum ShellIntegration {
         _pb_emit() {
             print -r -- "$1"$'\t'"$2" >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events" 2>/dev/null
         }
+        # The event names are SessionEvent's.
         _pb_preexec() { _pb_emit ShellExec "${1//$'\n'/ }" }
         _pb_precmd() { _pb_emit ShellPrompt "$?"$'\t'"$PWD" }
         autoload -Uz add-zsh-hook
@@ -184,7 +179,7 @@ enum ShellIntegration {
         fi
         claude() {
             case $1 in
-                agents|attach|auth|auto-mode|doctor|gateway|import|install|kill|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|ultrareview|update|upgrade|-v|--version|-h|--help)
+                \#(ClaudeCode.subcommandsWithoutSettings.joined(separator: "|")))
                     eval "$_pb_claude \"\$@\"" ;;
                 *)
                     eval "$_pb_claude --settings \"\$PATCHBAY_CLAUDE_SETTINGS\" \"\$@\"" ;;

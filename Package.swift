@@ -13,5 +13,10 @@ let package = Package(
             dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
             path: "Sources/Patchbay"
         ),
+        .testTarget(
+            name: "PatchbayTests",
+            dependencies: ["Patchbay"],
+            path: "Tests/PatchbayTests"
+        ),
     ]
 )

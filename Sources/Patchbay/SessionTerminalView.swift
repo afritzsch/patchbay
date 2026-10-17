@@ -6,6 +6,8 @@ final class SessionTerminalView: LocalProcessTerminalView {
     var onOutput: (() -> Void)?
     var onInput: (() -> Void)?
     var onBell: (() -> Void)?
+    /// The pane or overview hosts that want to show this terminal, oldest first (see `TerminalHostView`).
+    var hosts: [TerminalHostView.WeakHost] = []
 
     func applyStyle(fontSize: CGFloat) {
         font = NSFont(name: "SF Mono", size: fontSize)
@@ -22,7 +24,8 @@ final class SessionTerminalView: LocalProcessTerminalView {
         onOutput?()
     }
 
-    /// The terminal's own replies (focus reports, status queries) aren't user input.
+    /// The terminal's own replies (focus reports, status queries) aren't user input. This relies on SwiftTerm
+    /// sending them through `send(source: Terminal)` into `send(source: TerminalView)`; check after an update.
     private var sendingResponse = false
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {

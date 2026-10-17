@@ -3,12 +3,13 @@ import Foundation
 struct GitInfo: Equatable {
     /// The branch, or a short hash when HEAD is detached.
     var branch: String
-    /// Staged, unstaged and untracked files.
-    var changed: Int
     var ahead: Int
     var behind: Int
     /// Top of the working tree.
     var root: String
+    /// Staged, unstaged and untracked files.
+    var changes: [GitChange]
+    var changed: Int { changes.count }
 }
 
 /// One line of `git status`: the status letters of the index and of the working tree (" " for none, "?" untracked).
@@ -42,48 +43,41 @@ enum Git {
     /// nil when `directory` isn't in a git repository. Blocking: call off the main thread.
     static func info(at directory: String) -> GitInfo? {
         guard let root = run(["rev-parse", "--show-toplevel"], in: directory)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let status = run(["status", "--porcelain=v2", "--branch", "--untracked-files=all"], in: directory) else { return nil }
+              let status = run(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], in: directory)
+        else { return nil }
         return parse(status: status, root: root)
     }
 
-    /// Reads `git status --porcelain=v2 --branch`: `# branch.*` header lines, then one line per changed file.
+    /// Reads `git status --porcelain=v2 --branch -z`: `# branch.*` headers, then an entry per changed file, whose
+    /// path is its last field. A renamed or copied file's entry (type 2) is followed by its old path.
     static func parse(status: String, root: String) -> GitInfo {
-        var info = GitInfo(branch: "", changed: 0, ahead: 0, behind: 0, root: root)
+        var info = GitInfo(branch: "", ahead: 0, behind: 0, root: root, changes: [])
         var oid = ""
-        for line in status.split(separator: "\n") {
-            if !line.hasPrefix("#") {
-                info.changed += 1
-            } else if line.hasPrefix("# branch.head ") {
-                info.branch = String(line.dropFirst("# branch.head ".count))
-            } else if line.hasPrefix("# branch.oid ") {
-                oid = String(line.dropFirst("# branch.oid ".count))
-            } else if line.hasPrefix("# branch.ab ") { // "# branch.ab +1 -0", absent without an upstream
-                let fields = line.split(separator: " ")
+        let fieldCounts: [Character: Int] = ["1": 9, "2": 10, "u": 11]
+        var entries = status.split(separator: "\0")[...]
+        while let entry = entries.popFirst() {
+            if entry.hasPrefix("# branch.head ") {
+                info.branch = String(entry.dropFirst("# branch.head ".count))
+            } else if entry.hasPrefix("# branch.oid ") {
+                oid = String(entry.dropFirst("# branch.oid ".count))
+            } else if entry.hasPrefix("# branch.ab ") { // "# branch.ab +1 -0", absent without an upstream
+                let fields = entry.split(separator: " ")
                 guard fields.count == 4 else { continue }
                 info.ahead = Int(fields[2].dropFirst()) ?? 0
                 info.behind = Int(fields[3].dropFirst()) ?? 0
+            } else if entry.hasPrefix("? ") {
+                info.changes.append(GitChange(index: "?", worktree: "?", path: String(entry.dropFirst(2))))
+            } else if let type = entry.first, let count = fieldCounts[type] {
+                if type == "2" { _ = entries.popFirst() }
+                // "1 .M N... 100644 100644 100644 <hash> <hash> path"; "." is an unchanged side.
+                let fields = entry.split(separator: " ", maxSplits: count - 1, omittingEmptySubsequences: false)
+                guard fields.count == count, fields[1].count == 2 else { continue }
+                let xy = fields[1].map { $0 == "." ? " " : $0 }
+                info.changes.append(GitChange(index: xy[0], worktree: xy[1], path: String(fields[count - 1])))
             }
         }
         if info.branch == "(detached)" { info.branch = String(oid.prefix(7)) }
         return info
-    }
-
-    /// Changed files, for the source control tab. nil when git fails.
-    static func changes(at root: String) -> [GitChange]? {
-        run(["status", "--porcelain=v1", "-z", "--untracked-files=all"], in: root).map(parseChanges)
-    }
-
-    /// Reads `git status --porcelain=v1 -z`: `XY path` entries, a renamed file is followed by its old path.
-    static func parseChanges(_ status: String) -> [GitChange] {
-        var entries = status.split(separator: "\0")[...]
-        var changes: [GitChange] = []
-        while let entry = entries.popFirst() {
-            guard entry.count > 3 else { continue }
-            let (index, worktree) = (entry.first!, entry[entry.index(after: entry.startIndex)])
-            if "RC".contains(index) || "RC".contains(worktree) { _ = entries.popFirst() }
-            changes.append(GitChange(index: index, worktree: worktree, path: String(entry.dropFirst(3))))
-        }
-        return changes
     }
 
     /// The diff of one file, from either the staged or the unstaged side. nil when git fails.
@@ -184,5 +178,13 @@ enum Git {
         kill.cancel()
         guard read.wait(timeout: .now() + 1) == .success else { return (process.terminationStatus, "") }
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+}
+
+/// Runs blocking work (a process, a directory scan) on a GCD thread and awaits it. Swift concurrency has only
+/// about one thread per core for all tasks, so they must never sit waiting for a process.
+func inBackground<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async { continuation.resume(returning: work()) }
     }
 }

@@ -27,7 +27,7 @@ struct DiffView: View {
             lines = []
             while !Task.isCancelled {
                 if let root = store.selectedSession?.git?.root {
-                    let diff = await Task.detached { Git.diff(of: selection, in: root) }.value ?? ""
+                    let diff = await inBackground { Git.diff(of: selection, in: root) } ?? ""
                     let fresh = Git.parseDiff(diff)
                     if fresh != lines { lines = fresh }
                 }
