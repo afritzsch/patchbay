@@ -25,7 +25,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key><string>com.artemfritzsch.Patchbay</string>
+    <key>CFBundleIdentifier</key><string>app.patchbay.Patchbay</string>
     <key>CFBundleName</key><string>Patchbay</string>
     <key>CFBundleDisplayName</key><string>Patchbay</string>
     <key>CFBundleExecutable</key><string>Patchbay</string>
@@ -39,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
-            <key>UTTypeIdentifier</key><string>com.artemfritzsch.patchbay.session</string>
+            <key>UTTypeIdentifier</key><string>app.patchbay.session</string>
             <key>UTTypeDescription</key><string>Patchbay Session</string>
             <key>UTTypeConformsTo</key><array><string>public.data</string></array>
         </dict>
