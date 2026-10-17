@@ -264,12 +264,7 @@ private struct PaneHeader: View {
         .contentShape(.rect)
         .onTapGesture { store.selectedID = session.id }
         .onDrag { store.dragItem(for: session) }
-        .contextMenu {
-            Button("Rename…") { store.renamingID = session.id }
-            Button("Show History") { store.showHistory(for: session) }
-            if canClose { Button("Remove Pane") { store.closePane(session.id) } }
-            Button("Close Session", role: .destructive) { store.confirmAndClose(session) }
-        }
+        .contextMenu { SessionMenu(session: session) }
         .help("Drag onto another pane to move it there")
     }
 }
@@ -319,19 +314,17 @@ final class TerminalHostView: NSView {
 
     private var terminal: NSView? { subviews.first { $0 !== highlight } }
     /// The terminal this host shows, which may for a moment sit in another host.
-    private weak var claimed: NSView?
+    private weak var claimed: SessionTerminalView?
     private var wantsFocus = false
 
-    /// Hosts that want each terminal, oldest first. When the main area switches between panes and the overview,
-    /// SwiftUI makes the new host before it last updates the old one, so both ask for the same terminal; it goes
-    /// to the newest host in the window.
-    private static var claimants: [ObjectIdentifier: [WeakHost]] = [:]
-
-    private struct WeakHost {
+    /// A host in a terminal's `hosts`. When the main area switches between panes and the overview, SwiftUI makes
+    /// the new host before it last updates the old one, so both ask for the same terminal; it goes to the newest
+    /// host in the window.
+    struct WeakHost {
         weak var host: TerminalHostView?
     }
 
-    func show(_ terminal: NSView, focus: Bool) {
+    func show(_ terminal: SessionTerminalView, focus: Bool) {
         if claimed !== terminal {
             if let claimed { Self.unclaim(claimed, by: self) }
             claimed = terminal
@@ -355,20 +348,18 @@ final class TerminalHostView: NSView {
         }
     }
 
-    private static func claim(_ terminal: NSView, by host: TerminalHostView) {
-        var hosts = claimants[ObjectIdentifier(terminal), default: []].filter { $0.host != nil && $0.host !== host }
-        hosts.append(WeakHost(host: host))
-        claimants[ObjectIdentifier(terminal)] = hosts
+    private static func claim(_ terminal: SessionTerminalView, by host: TerminalHostView) {
+        unclaim(terminal, by: host)
+        terminal.hosts.append(WeakHost(host: host))
     }
 
-    private static func unclaim(_ terminal: NSView, by host: TerminalHostView) {
-        let hosts = claimants[ObjectIdentifier(terminal), default: []].filter { $0.host != nil && $0.host !== host }
-        claimants[ObjectIdentifier(terminal)] = hosts.isEmpty ? nil : hosts
+    private static func unclaim(_ terminal: SessionTerminalView, by host: TerminalHostView) {
+        terminal.hosts.removeAll { $0.host == nil || $0.host === host }
     }
 
     /// Puts the terminal in its newest claimant that is in a window, or else its newest claimant.
-    private static func settle(_ terminal: NSView) {
-        let hosts = claimants[ObjectIdentifier(terminal), default: []].compactMap(\.host)
+    private static func settle(_ terminal: SessionTerminalView) {
+        let hosts = terminal.hosts.compactMap(\.host)
         guard let owner = hosts.last(where: { $0.window != nil }) ?? hosts.last else { return }
         owner.attach(terminal)
     }
@@ -431,7 +422,7 @@ final class TerminalHostView: NSView {
         return droppedFiles(info).isEmpty ? nil : zone
     }
 
-    static func zone(at point: NSPoint, in bounds: NSRect) -> DropZone {
+    nonisolated static func zone(at point: NSPoint, in bounds: NSRect) -> DropZone {
         guard bounds.width > 0, bounds.height > 0 else { return .center }
         let x = (point.x - bounds.minX) / bounds.width
         let y = 1 - (point.y - bounds.minY) / bounds.height // 0 at the top
@@ -469,7 +460,7 @@ final class TerminalHostView: NSView {
             return true
         case .external(let external):
             // After the drag has finished, so the confirmation isn't shown mid-drop.
-            DispatchQueue.main.async { store.bringIn(external, splitting: target, zone: zone) }
+            DispatchQueue.main.async { store.confirmAndBringIn(external, splitting: target, zone: zone) }
             return true
         case nil:
             break
@@ -480,16 +471,13 @@ final class TerminalHostView: NSView {
             let paths = files.map { Self.shellEscaped($0.path) }.joined(separator: " ")
             store.sessions.first { $0.id == target }?.terminal.send(txt: paths + " ")
         } else {
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: first.path, isDirectory: &isDirectory)
-            let folder = isDirectory.boolValue ? first.path : first.deletingLastPathComponent().path
-            store.drop(folder: folder, on: target, zone: zone)
+            store.open(droppedURLs: [first], splitting: target, zone: zone)
         }
         return true
     }
 
     /// Backslash-escapes a path the way Terminal does for dropped files.
-    static func shellEscaped(_ path: String) -> String {
+    nonisolated static func shellEscaped(_ path: String) -> String {
         let special = Set(" \t\\'\"`$&|;<>()[]{}*?!#~=%^")
         return String(path.flatMap { special.contains($0) ? ["\\", $0] : [$0] })
     }

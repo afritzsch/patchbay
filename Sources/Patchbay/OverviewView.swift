@@ -165,7 +165,7 @@ private struct OverviewCard: View {
                 ElapsedText(since: session.statusSince)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button(action: openInPanes) {
+                Button { store.show(session.id) } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 10, weight: .semibold))
                         .frame(width: 16, height: 16)
@@ -190,20 +190,10 @@ private struct OverviewCard: View {
             }
         }
         .contentShape(.rect)
-        .onTapGesture(count: 2, perform: openInPanes)
+        .onTapGesture(count: 2) { store.show(session.id) }
         .onTapGesture { store.selectedID = session.id }
         .onDrag { store.dragItem(for: session) }
-        .contextMenu {
-            Button("Open in Panes", action: openInPanes)
-            Button("Rename…") { store.renamingID = session.id }
-            Button("Show History") { store.showHistory(for: session) }
-            Button("Close Session", role: .destructive) { store.confirmAndClose(session) }
-        }
+        .contextMenu { SessionMenu(session: session) }
         .help("Double-click to open in the panes, drag onto a pane to move it there")
-    }
-
-    private func openInPanes() {
-        store.selectedID = session.id
-        store.showOverview = false
     }
 }

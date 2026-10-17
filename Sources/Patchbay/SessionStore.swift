@@ -47,47 +47,29 @@ final class SessionStore {
     var renamingID: UUID?
 
     /// Overview grid: a fixed number of columns, or 0 to fit the window.
-    var overviewColumns = UserDefaults.standard.integer(forKey: Keys.overviewColumns) {
-        didSet { UserDefaults.standard.set(overviewColumns, forKey: Keys.overviewColumns) }
+    var overviewColumns = UserDefaults.standard.integer(forKey: Preferences.Keys.overviewColumns) {
+        didSet { UserDefaults.standard.set(overviewColumns, forKey: Preferences.Keys.overviewColumns) }
     }
     /// Relative column widths and row heights in the overview, as dragged by the user.
-    var overviewColumnFractions = UserDefaults.standard.array(forKey: Keys.overviewColumnFractions) as? [Double] ?? []
-    var overviewRowFractions = UserDefaults.standard.array(forKey: Keys.overviewRowFractions) as? [Double] ?? []
+    var overviewColumnFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewColumnFractions) as? [Double] ?? []
+    var overviewRowFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewRowFractions) as? [Double] ?? []
 
     func saveOverviewSizes() {
-        UserDefaults.standard.set(overviewColumnFractions, forKey: Keys.overviewColumnFractions)
-        UserDefaults.standard.set(overviewRowFractions, forKey: Keys.overviewRowFractions)
+        UserDefaults.standard.set(overviewColumnFractions, forKey: Preferences.Keys.overviewColumnFractions)
+        UserDefaults.standard.set(overviewRowFractions, forKey: Preferences.Keys.overviewRowFractions)
     }
     var showNewSessionSheet = false
 
-    var fontSize: CGFloat = {
-        let saved = UserDefaults.standard.double(forKey: Keys.fontSize)
-        return saved > 0 ? saved : 13
-    }() {
+    var fontSize = CGFloat(UserDefaults.standard.double(forKey: Preferences.Keys.fontSize)) {
         didSet {
-            UserDefaults.standard.set(fontSize, forKey: Keys.fontSize)
+            UserDefaults.standard.set(fontSize, forKey: Preferences.Keys.fontSize)
             for session in sessions { session.terminal.applyStyle(fontSize: fontSize) }
         }
     }
 
-    private(set) var recentDirectories: [String] = UserDefaults.standard.stringArray(forKey: Keys.recentDirectories) ?? []
+    private(set) var recentDirectories: [String] = UserDefaults.standard.stringArray(forKey: Preferences.Keys.recentDirectories) ?? []
 
     @ObservationIgnored private var timers: [Timer] = []
-
-    enum Keys {
-        static let fontSize = "fontSize"
-        static let recentDirectories = "recentDirectories"
-        static let savedSessions = "savedSessions"
-        static let savedLayout = "savedLayout"
-        static let overviewColumns = "overviewColumns"
-        static let overviewColumnFractions = "overviewColumnFractions"
-        static let overviewRowFractions = "overviewRowFractions"
-        static let restoreSessions = "restoreSessions"
-        static let resumeClaude = "resumeClaude"
-        static let notify = "notify"
-        /// An agent's id, or "shell": what the new-session sheet starts.
-        static let startAgent = "startAgent"
-    }
 
     var selectedSession: TerminalSession? {
         sessions.first { $0.id == selectedID }
@@ -98,13 +80,6 @@ final class SessionStore {
     }
 
     init() {
-        if let startClaude = UserDefaults.standard.object(forKey: "startClaude") as? Bool { // Replaced by startAgent.
-            UserDefaults.standard.set(startClaude ? "claude" : "shell", forKey: Keys.startAgent)
-            UserDefaults.standard.removeObject(forKey: "startClaude")
-        }
-        UserDefaults.standard.register(defaults: [
-            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.startAgent: "claude",
-        ])
         do {
             try ShellIntegration.install()
         } catch {
@@ -117,13 +92,16 @@ final class SessionStore {
             MainActor.assumeIsolated { self?.tick() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scanExternalSessions() }
+            MainActor.assumeIsolated {
+                self?.scanExternalSessions()
+                self?.usage.reload()
+            }
         })
         // Sessions mark their git state stale when a command or tool finishes; this catches changes made elsewhere.
         timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshGit(all: true) }
         })
-        if UserDefaults.standard.bool(forKey: Keys.restoreSessions) { restore() }
+        if UserDefaults.standard.bool(forKey: Preferences.Keys.restoreSessions) { restore() }
     }
 
     // MARK: - Sessions
@@ -161,11 +139,11 @@ final class SessionStore {
             self?.record(kind, session, text: text, exitCode: exitCode, duration: duration)
         }
         sessions.append(session)
-        rememberDirectory(dir)
         if let target, let layout, layout.contains(target) {
             self.layout = layout.inserting(session.id, at: target, zone: zone)
         }
-        if select {
+        if select { // Not when restoring, which would reorder the recent folders.
+            rememberDirectory(dir)
             selectedID = session.id
             if mode == .history { mode = .panes }
             record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
@@ -188,7 +166,7 @@ final class SessionStore {
 
     /// What the new-session sheet started last: an agent, or nil for a plain shell.
     var lastAgent: Agent? {
-        UserDefaults.standard.string(forKey: Keys.startAgent).flatMap(Agent.named)
+        UserDefaults.standard.string(forKey: Preferences.Keys.startAgent).flatMap(Agent.named)
     }
 
     /// The agent for "New … Session in This Folder" menu items: the last one, Claude if that was a plain shell.
@@ -226,60 +204,18 @@ final class SessionStore {
         save()
     }
 
-    /// Opens a session for each folder dropped from Finder or a terminal's title-bar folder icon
-    /// (a file opens its folder).
-    func open(droppedURLs urls: [URL]) {
-        for url in urls {
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
-            let folder = isDirectory.boolValue ? url.path : url.deletingLastPathComponent().path
-            openFolder(folder, splitting: nil, zone: .right)
-        }
-    }
-
-    /// A dropped folder where Claude is already running in another terminal offers to bring that session in.
-    private func openFolder(_ folder: String, splitting target: UUID?, zone: DropZone) {
-        let path = (folder as NSString).standardizingPath
-        if let external = externalSessions.first(where: { ($0.cwd as NSString).standardizingPath == path }) {
-            let alert = NSAlert()
-            alert.messageText = "Claude Code is running in “\(external.displayName)” in \(external.hostApp ?? "another terminal")"
-            alert.informativeText = "Move that session here, or start a new one in this folder?"
-            alert.addButton(withTitle: "Move It Here")
-            alert.addButton(withTitle: "New Session")
-            alert.addButton(withTitle: "Cancel")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
-                bringIn(external, splitting: target, zone: zone, confirmed: true)
-                return
-            case .alertSecondButtonReturn:
-                break
-            default:
-                return
-            }
-        }
-        newSession(directory: folder, agent: lastAgent, splitting: target, zone: zone)
-    }
-
-    /// Handles something dragged into the sidebar list at `index`.
-    func dropInSidebar(at index: Int) {
-        defer { dragged = nil }
-        switch dragged {
-        case .session(let id):
-            guard let from = sessions.firstIndex(where: { $0.id == id }) else { return }
-            move(from: IndexSet(integer: from), to: index)
-        case .external(let external):
-            DispatchQueue.main.async { self.bringIn(external, splitting: nil, zone: .right) }
-        case nil:
-            break
-        }
-    }
-
     // MARK: - Sessions in other terminals
+
+    /// The Claude session running in `folder` in another terminal, if any.
+    func externalSession(in folder: String) -> ExternalSession? {
+        let path = (folder as NSString).standardizingPath
+        return externalSessions.first { ($0.cwd as NSString).standardizingPath == path }
+    }
 
     /// Off the main thread: the scan reads files and walks process trees.
     private func scanExternalSessions() {
         Task {
-            let found = await Task.detached { ExternalSessionScanner.scan() }.value.filter { !movingPIDs.contains($0.pid) }
+            let found = await inBackground { ExternalSessionScanner.scan() }.filter { !movingPIDs.contains($0.pid) }
             if found != externalSessions { externalSessions = found }
         }
     }
@@ -294,20 +230,7 @@ final class SessionStore {
 
     /// Moves a Claude session from another terminal into this app: quits it there, then resumes the same
     /// conversation here (in a split of `target` when given).
-    func bringIn(_ external: ExternalSession, splitting target: UUID?, zone: DropZone, confirmed: Bool = false) {
-        if !confirmed {
-            let alert = NSAlert()
-            alert.messageText = "Move “\(external.displayName)” into Patchbay?"
-            var info = "Claude Code will quit in \(external.hostApp ?? "the other terminal") and the conversation "
-                + "continues here (claude --resume)."
-            if external.busy {
-                info += "\n\nClaude is working right now; moving it interrupts the current step. You can ask it to carry on afterwards."
-            }
-            alert.informativeText = info
-            alert.addButton(withTitle: "Move")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
+    func bringIn(_ external: ExternalSession, splitting target: UUID?, zone: DropZone) {
         movingPIDs.insert(external.pid)
         externalSessions.removeAll { $0.pid == external.pid }
         ExternalSessionScanner.terminate(external) { [weak self] ended in
@@ -325,6 +248,8 @@ final class SessionStore {
     // MARK: - Git
 
     @ObservationIgnored private var gitRefreshInFlight = false
+    /// The Changes tab is showing: the focused session's git state is refreshed every second.
+    @ObservationIgnored var watchingChanges = false
 
     /// Reads the git state of the stale sessions' folders (every session's with `all`) off the main thread;
     /// one `git` run per distinct folder.
@@ -335,9 +260,9 @@ final class SessionStore {
         for session in refreshing { session.gitStale = false }
         let directories = Set(refreshing.map(\.cwd))
         Task {
-            let infos = await Task.detached {
+            let infos = await inBackground {
                 directories.reduce(into: [String: GitInfo]()) { $0[$1] = Git.info(at: $1) }
-            }.value
+            }
             for session in sessions where directories.contains(session.cwd) && session.git != infos[session.cwd] {
                 session.git = infos[session.cwd]
             }
@@ -377,14 +302,8 @@ final class SessionStore {
             layout = layout.inserting(id, at: target, zone: zone)
         }
         self.layout = layout
-        selectedID = id
-        showOverview = false
+        show(id)
         save()
-    }
-
-    /// Opens a new session for a folder dropped on a pane edge.
-    func drop(folder: String, on target: UUID, zone: DropZone) {
-        openFolder(folder, splitting: target, zone: zone)
     }
 
     /// Removes a pane from the screen; its session keeps running in the sidebar.
@@ -411,25 +330,10 @@ final class SessionStore {
     func focusAdjacentPane(_ offset: Int) {
         guard let ids = layout?.sessionIDs, ids.count > 1 else { return }
         let current = ids.firstIndex { $0 == selectedID } ?? 0
-        selectedID = ids[(current + offset + ids.count) % ids.count]
-        showOverview = false
+        show(ids[(current + offset + ids.count) % ids.count])
     }
 
     var paneCount: Int { layout?.sessionIDs.count ?? 0 }
-
-    /// Asks before closing a session that is still doing something.
-    func confirmAndClose(_ session: TerminalSession) {
-        if session.isBusy || session.agent != nil {
-            let alert = NSAlert()
-            alert.messageText = "Close “\(session.displayName)”?"
-            alert.informativeText = session.agent.map { "\($0.name) is still running in this session." }
-                ?? "A command is still running in this session."
-            alert.addButton(withTitle: "Close")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        close(session)
-    }
 
     func move(from source: IndexSet, to destination: Int) {
         sessions.move(fromOffsets: source, toOffset: destination)
@@ -444,10 +348,15 @@ final class SessionStore {
 
     // MARK: - Navigation
 
+    /// Focuses a session in the panes, leaving the overview or history.
+    func show(_ id: UUID) {
+        selectedID = id
+        mode = .panes
+    }
+
     func select(index: Int) {
         guard sessions.indices.contains(index) else { return }
-        selectedID = sessions[index].id
-        showOverview = false
+        show(sessions[index].id)
     }
 
     func selectAdjacent(_ offset: Int) {
@@ -487,6 +396,7 @@ final class SessionStore {
             session.checkForSilence()
             if session.unseen, session.isVisible() { session.markSeen() }
         }
+        if watchingChanges { selectedSession?.gitStale = true }
         save() // Directories and Claude session IDs change as the sessions run; unchanged state isn't written.
     }
 
@@ -508,7 +418,7 @@ final class SessionStore {
     }
 
     private func notify(_ session: TerminalSession, _ text: String) {
-        guard Self.notificationsAvailable, UserDefaults.standard.bool(forKey: Keys.notify), !session.isVisible()
+        guard Self.notificationsAvailable, UserDefaults.standard.bool(forKey: Preferences.Keys.notify), !session.isVisible()
         else { return }
         let content = UNMutableNotificationContent()
         content.title = session.displayName
@@ -543,17 +453,17 @@ final class SessionStore {
         let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) }]
         guard state != lastSaved else { return }
         lastSaved = state
-        UserDefaults.standard.set(state[0], forKey: Keys.savedSessions)
-        UserDefaults.standard.set(state[1], forKey: Keys.savedLayout)
+        UserDefaults.standard.set(state[0], forKey: Preferences.Keys.savedSessions)
+        UserDefaults.standard.set(state[1], forKey: Preferences.Keys.savedLayout)
     }
 
     private func restore() {
-        guard let data = UserDefaults.standard.data(forKey: Keys.savedSessions),
+        guard let data = UserDefaults.standard.data(forKey: Preferences.Keys.savedSessions),
               let saved = try? JSONDecoder().decode([SavedSession].self, from: data) else { return }
         // Read before creating sessions: each new session saves, which would overwrite it.
-        let savedLayout = UserDefaults.standard.data(forKey: Keys.savedLayout)
+        let savedLayout = UserDefaults.standard.data(forKey: Preferences.Keys.savedLayout)
             .flatMap { try? JSONDecoder().decode(PaneLayout.self, from: $0) }
-        let resume = UserDefaults.standard.bool(forKey: Keys.resumeClaude)
+        let resume = UserDefaults.standard.bool(forKey: Preferences.Keys.resumeClaude)
         for item in saved {
             let wasClaude = item.claude ?? (item.claudeSessionID != nil)
             var agent = (item.agentID ?? (wasClaude ? Agent.claude.id : nil)).flatMap(Agent.named)
@@ -570,6 +480,6 @@ final class SessionStore {
         recentDirectories.removeAll { $0 == dir }
         recentDirectories.insert(dir, at: 0)
         recentDirectories = Array(recentDirectories.prefix(10))
-        UserDefaults.standard.set(recentDirectories, forKey: Keys.recentDirectories)
+        UserDefaults.standard.set(recentDirectories, forKey: Preferences.Keys.recentDirectories)
     }
 }

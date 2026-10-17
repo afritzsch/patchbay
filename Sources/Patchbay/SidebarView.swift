@@ -35,8 +35,7 @@ struct SidebarView: View {
         List(selection: Binding(
             get: { store.mode == .panes ? store.selectedID : nil },
             set: { id in
-                store.selectedID = id
-                if id != nil { store.showOverview = false }
+                if let id { store.show(id) } else { store.selectedID = nil }
             }
         )) {
             Section {
@@ -46,11 +45,10 @@ struct SidebarView: View {
                         .overlay {
                             RowDragSource(payload: .session(session.id), name: session.displayName,
                                           toolTip: index < 9 ? "⌘\(index + 1)" : nil) {
-                                store.selectedID = session.id
-                                store.showOverview = false
+                                store.show(session.id)
                             }
                         }
-                        .contextMenu { contextMenu(for: session) }
+                        .contextMenu { SessionMenu(session: session) }
                 }
                 .onInsert(of: [.terminalSession]) { index, _ in store.dropInSidebar(at: index) }
             } header: {
@@ -68,12 +66,9 @@ struct SidebarView: View {
                         ExternalSessionRow(external: external)
                             .contextMenu {
                                 Button("Move Into Patchbay") {
-                                    store.bringIn(external, splitting: nil, zone: .right)
+                                    store.confirmAndBringIn(external, splitting: nil, zone: .right)
                                 }
-                                Button("Copy Path") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(external.cwd, forType: .string)
-                                }
+                                Button("Copy Path") { copyToPasteboard(external.cwd) }
                             }
                     }
                     if store.externalSessions.count > externalLimit {
@@ -97,15 +92,15 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Divider()
                 UsageBars()
-            HStack {
-                Button {
-                    store.showNewSessionSheet = true
-                } label: {
-                    Label("New Session", systemImage: "plus")
+                HStack {
+                    Button {
+                        store.showNewSessionSheet = true
+                    } label: {
+                        Label("New Session", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    Spacer()
                 }
-                .buttonStyle(.borderless)
-                Spacer()
-            }
             }
             .padding(10)
             .background(.bar)
@@ -113,15 +108,23 @@ struct SidebarView: View {
     }
 
     private var summary: String {
-        let working = store.sessions.filter { $0.status == .agentWorking || { if case .running = $0.status { true } else { false } }($0) }.count
+        let working = store.sessions.filter { $0.isBusy && $0.status != .agentNeedsInput }.count
         var parts: [String] = []
         if working > 0 { parts.append("\(working) busy") }
         if store.attentionCount > 0 { parts.append("\(store.attentionCount) waiting") }
         return parts.joined(separator: " · ")
     }
+}
 
-    @ViewBuilder
-    private func contextMenu(for session: TerminalSession) -> some View {
+/// The context menu of a session, wherever it is shown.
+struct SessionMenu: View {
+    @Environment(SessionStore.self) private var store
+    let session: TerminalSession
+
+    var body: some View {
+        if store.mode != .panes || store.layout?.contains(session.id) != true {
+            Button("Open in Panes") { store.show(session.id) }
+        }
         Button("Rename…") { store.renamingID = session.id }
         Button("Show History") { store.showHistory(for: session) }
         if let focused = store.selectedID, focused != session.id, store.layout != nil {
@@ -142,15 +145,9 @@ struct SidebarView: View {
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.cwd)])
         }
-        Button("Copy Path") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(session.cwd, forType: .string)
-        }
+        Button("Copy Path") { copyToPasteboard(session.cwd) }
         if let git = session.git {
-            Button("Copy Branch Name") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(git.branch, forType: .string)
-            }
+            Button("Copy Branch Name") { copyToPasteboard(git.branch) }
         }
         Divider()
         Button("Close Session", role: .destructive) { store.confirmAndClose(session) }
@@ -251,7 +248,7 @@ struct ExternalSessionRow: View {
                               toolTip: "Drag onto a pane to move this session here")
             }
             Button {
-                store.bringIn(external, splitting: nil, zone: .right)
+                store.confirmAndBringIn(external, splitting: nil, zone: .right)
             } label: {
                 Image(systemName: "arrow.down.forward.square")
                     .font(.system(size: 14))

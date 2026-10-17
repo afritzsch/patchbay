@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// How a session's status is shown in the sidebar, header and overview.
-extension TerminalSession {
+extension SessionState {
     var statusLabel: String {
         switch status {
         case .starting: "Starting"
@@ -40,13 +40,16 @@ extension TerminalSession {
         }
     }
 
+}
+
+extension TerminalSession {
     /// The most useful one-line detail: what's running, what Claude asked, or what it was asked.
     var detailLine: String? {
-        if case .running(let command) = status { return command }
-        if status == .agentNeedsInput, let message { return message }
-        if let message, unseen { return message }
-        if agent != nil {
-            if let lastPrompt { return lastPrompt }
+        if case .running(let command) = state.status { return command }
+        if state.status == .agentNeedsInput, let message = state.message { return message }
+        if let message = state.message, state.unseen { return message }
+        if state.agent != nil {
+            if let lastPrompt = state.lastPrompt { return lastPrompt }
             if !title.isEmpty { return title }
         }
         return nil
@@ -56,12 +59,12 @@ extension TerminalSession {
     /// Sessions in one folder all look alike by `displayName`.
     var rowTitle: String {
         if let customName, !customName.isEmpty { return customName }
-        if agent != nil, let topic = lastPrompt ?? (title.isEmpty ? nil : title) { return topic }
+        if state.agent != nil, let topic = state.lastPrompt ?? (title.isEmpty ? nil : title) { return topic }
         return displayName
     }
 
     var abbreviatedCwd: String {
-        (cwd as NSString).abbreviatingWithTildeInPath
+        (state.cwd as NSString).abbreviatingWithTildeInPath
     }
 }
 
@@ -87,7 +90,7 @@ struct ElapsedText: View {
         }
     }
 
-    static func format(_ interval: TimeInterval) -> String {
+    nonisolated static func format(_ interval: TimeInterval) -> String {
         let s = max(0, Int(interval))
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m" }

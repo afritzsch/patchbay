@@ -1,5 +1,4 @@
 import AppKit
-import Synchronization
 
 /// An interactive Claude Code session running in another terminal app (Terminal, iTerm, …).
 struct ExternalSession: Identifiable, Equatable {
@@ -16,24 +15,6 @@ struct ExternalSession: Identifiable, Equatable {
     var displayName: String { (cwd as NSString).lastPathComponent }
 
     var hasTranscript: Bool { ClaudeTranscripts.exist(for: sessionID) }
-}
-
-enum ClaudeTranscripts {
-    /// Whether Claude has saved a conversation that `--resume` can open; a session nobody has typed into
-    /// yet hasn't, and resuming it fails.
-    static func exist(for sessionID: String) -> Bool {
-        if found.withLock({ $0.contains(sessionID) }) { return true }
-        let projects = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects")
-        let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects.path)) ?? []
-        let exists = folders.contains {
-            FileManager.default.fileExists(atPath: projects.appendingPathComponent("\($0)/\(sessionID).jsonl").path)
-        }
-        if exists { found.withLock { _ = $0.insert(sessionID) } }
-        return exists
-    }
-
-    /// Transcripts seen before aren't looked up again (the history view asks for every row it draws).
-    private static let found = Mutex<Set<String>>([])
 }
 
 /// Finds Claude Code sessions outside this app through the registry Claude keeps in `~/.claude/sessions`,
@@ -101,18 +82,15 @@ enum ExternalSessionScanner {
 
     // MARK: - Processes
 
-    private static let valueOptions: Set<String> = ["--model", "--permission-mode", "--add-dir", "--effort", "--agent", "--fallback-model"]
-    private static let flagOptions: Set<String> = ["--dangerously-skip-permissions", "--verbose", "--ide"]
-
     static func carriedArgs(from args: [String]) -> [String] {
         var kept: [String] = []
         var index = 0
         while index < args.count {
             let arg = args[index]
             let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
-            if flagOptions.contains(arg) {
+            if ClaudeCode.carriedFlagOptions.contains(arg) {
                 kept.append(arg)
-            } else if valueOptions.contains(name) {
+            } else if ClaudeCode.carriedValueOptions.contains(name) {
                 if arg.contains("=") {
                     kept.append(arg)
                 } else if index + 1 < args.count {

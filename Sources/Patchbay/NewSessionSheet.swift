@@ -3,7 +3,7 @@ import SwiftUI
 struct NewSessionSheet: View {
     @Environment(SessionStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(SessionStore.Keys.startAgent) private var startAgent = "claude"
+    @AppStorage(Preferences.Keys.startAgent) private var startAgent = "claude"
     @State private var directory = ""
     @State private var name = ""
     @State private var prompt = ""
@@ -75,9 +75,9 @@ struct NewSessionSheet: View {
 }
 
 struct SettingsView: View {
-    @AppStorage(SessionStore.Keys.restoreSessions) private var restoreSessions = true
-    @AppStorage(SessionStore.Keys.resumeClaude) private var resumeClaude = true
-    @AppStorage(SessionStore.Keys.notify) private var notify = true
+    @AppStorage(Preferences.Keys.restoreSessions) private var restoreSessions = true
+    @AppStorage(Preferences.Keys.resumeClaude) private var resumeClaude = true
+    @AppStorage(Preferences.Keys.notify) private var notify = true
     @Environment(SessionStore.self) private var store
     @State private var customAgents = Agent.custom
 
@@ -88,7 +88,7 @@ struct SettingsView: View {
             Toggle("Resume Claude conversations when reopening", isOn: $resumeClaude)
                 .disabled(!restoreSessions)
             Toggle("Notify when an agent needs input or finishes", isOn: $notify)
-            Stepper("Font size: \(Int(store.fontSize)) pt", value: $store.fontSize, in: 9...28)
+            Stepper("Font size: \(Int(store.fontSize)) pt", value: $store.fontSize, in: Preferences.fontSizes)
             Picker("Keep history for", selection: Bindable(store.history).retentionDays) {
                 Text("7 days").tag(7)
                 Text("30 days").tag(30)
@@ -98,12 +98,8 @@ struct SettingsView: View {
             }
             LabeledContent("History") {
                 Button("Clear History…") {
-                    let alert = NSAlert()
-                    alert.messageText = "Clear all history?"
-                    alert.informativeText = "\(store.history.entries.count) entries will be deleted. Sessions and Claude conversations are not affected."
-                    alert.addButton(withTitle: "Clear")
-                    alert.addButton(withTitle: "Cancel")
-                    if alert.runModal() == .alertFirstButtonReturn { store.history.clear() }
+                    let info = "\(store.history.entries.count) entries will be deleted. Sessions and Claude conversations are not affected."
+                    if Ask.confirm("Clear all history?", info, action: "Clear") { store.history.clear() }
                 }
             }
             Section("Other agents") {

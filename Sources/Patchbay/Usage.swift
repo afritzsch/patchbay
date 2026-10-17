@@ -7,7 +7,8 @@ struct UsageWindow: Equatable {
 }
 
 /// Claude plan usage (5-hour and weekly limits), read from the `usage.json` the status line script writes
-/// every time a Claude session updates its status line. Only as fresh as the last update from any session.
+/// every time a Claude session updates its status line. Only as fresh as the last update from any session;
+/// the store reloads it every few seconds.
 @MainActor @Observable
 final class UsageMonitor {
     private(set) var fiveHour: UsageWindow?
@@ -15,17 +16,13 @@ final class UsageMonitor {
     private(set) var updatedAt: Date?
 
     static let file = ShellIntegration.supportDir.appendingPathComponent("usage.json")
-    @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var lastModified: Date?
 
     init() {
         reload()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload() }
-        }
     }
 
-    private func reload() {
+    func reload() {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: Self.file.path),
               let modified = attributes[.modificationDate] as? Date, modified != lastModified,
               let data = try? Data(contentsOf: Self.file),
