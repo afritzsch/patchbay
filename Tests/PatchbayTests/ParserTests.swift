@@ -82,6 +82,23 @@ struct GitParserTests {
         #expect(lines.map(\.new) == [nil, 3, nil, 4, 5])
         #expect(lines[2].text == "old")
     }
+
+    @Test func reviewMessage() {
+        let lines = Git.parseDiff("@@ -3,2 +3,3 @@\n same\n-old\n+new\n+more\n")
+        let comments = [
+            ReviewComment(path: "a.swift", lines: lines[1...1], text: "why?"),
+            ReviewComment(path: "a.swift", lines: lines[1...4], text: " two\nlines "),
+            ReviewComment(path: "b.swift", lines: lines[2...2], text: "keep this"),
+        ]
+        #expect(comments.map(\.lines) == ["3", "3-5", "4 (removed)"])
+        #expect(ReviewComment.message(comments) == """
+            Review comments:
+            - a.swift:3: why?
+            - a.swift:3-5: two
+              lines
+            - b.swift:4 (removed): keep this
+            """)
+    }
 }
 
 struct SmallParserTests {

@@ -14,6 +14,8 @@ final class TerminalSession: Identifiable {
     private(set) var state: SessionState
     /// The working tree's git state; nil outside a repository.
     var git: GitInfo?
+    /// Comments on its diff, waiting to be sent to the agent.
+    var reviewComments: [ReviewComment] = []
 
     @ObservationIgnored let terminal: SessionTerminalView
     @ObservationIgnored private var lastOutput = Date()
@@ -122,6 +124,17 @@ final class TerminalSession: Identifiable {
     func answerApproval(allow: Bool) {
         guard state.asksApproval, let approval = state.agent?.approval else { return }
         terminal.send(txt: Agent.Approval.keys(allow ? approval.allow : approval.deny))
+    }
+
+    /// Types the review comments into the terminal as one paste, without pressing Return, and focuses it.
+    func sendReviewComments() {
+        let message = ReviewComment.message(reviewComments)
+        // Without bracketed paste, each newline would press Return.
+        terminal.send(txt: terminal.getTerminal().bracketedPasteMode
+            ? "\u{1b}[200~\(message)\u{1b}[201~"
+            : message.replacingOccurrences(of: "\n", with: " "))
+        reviewComments = []
+        terminal.window?.makeFirstResponder(terminal)
     }
 
     func markSeen() {
