@@ -7,6 +7,7 @@ let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingL
 let builtApp = repo.appending(path: "build/Patchbay.app")
 let devDir = repo.appending(path: "build/dev")
 let snapshotFile = devDir.appending(path: "snapshot.png")
+let layoutFile = devDir.appending(path: "layout.txt")
 let logFile = devDir.appending(path: "app.log")
 
 struct ToolError: Error { let message: String }
@@ -33,6 +34,8 @@ enum Tool: String, CaseIterable {
     case snapshot
     case typeText = "type_text"
     case clickMenu = "click_menu"
+    case dropSession = "drop_session"
+    case layout
     case logs
     case stopTestApp = "stop_test_app"
 
@@ -46,6 +49,15 @@ enum Tool: String, CaseIterable {
         case .snapshot: "Returns a PNG of the test copy's window."
         case .typeText: "Types into the selected session of the test copy. End with \\n to press Return. A new shell needs about a second before it reads input."
         case .clickMenu: "Clicks a menu item of the test copy by exact title, e.g. \"Split Right\", \"New Shell Here\", \"Show Overview\"."
+        case .dropSession: """
+            Drops one session on another's pane, as dragging it there with the mouse would (drags can't be automated). \
+            Sessions are numbered as in the sidebar from 1. Edges split the pane, the centre swaps or replaces it. \
+            Returns the layout afterwards.
+            """
+        case .layout: """
+            Returns the pane tree, sessions numbered as in the sidebar: H[…] is a row, V[…] a column, each child \
+            followed by its share, e.g. H[1:0.50 V[2:0.50 3:0.50]:0.50]. Then each terminal's frame in window points.
+            """
         case .logs: "Returns the end of the test copy's stdout and stderr (print and NSLog output)."
         case .stopTestApp: "Quits the test copy and deletes it, its support folder and its defaults, so the next start is fresh."
         }
@@ -55,6 +67,8 @@ enum Tool: String, CaseIterable {
         switch self {
         case .typeText: ["text": ["type": "string"]]
         case .clickMenu: ["title": ["type": "string"]]
+        case .dropSession: ["session": ["type": "integer"], "target": ["type": "integer"],
+                            "zone": ["type": "string", "enum": ["left", "right", "top", "bottom", "center"]]]
         case .logs: ["lines": ["type": "integer", "description": "How many lines (default 50)"]]
         default: [:]
         }
@@ -99,6 +113,12 @@ func call(_ tool: Tool, _ args: [String: Any]) throws -> [[String: Any]] {
     case .clickMenu:
         try post("menu", args["title"] as? String ?? "")
         return [text("Clicked, unless `logs` says no such item exists.")]
+    case .dropSession:
+        try post("drop", "\(args["session"] as? Int ?? 0) \(args["target"] as? Int ?? 0) \(args["zone"] as? String ?? "")")
+        Thread.sleep(forTimeInterval: 0.5)  // let the window lay out the new panes
+        return [text(try requestLayout())]
+    case .layout:
+        return [text(try requestLayout())]
     case .logs:
         let log = (try? String(contentsOf: logFile, encoding: .utf8)) ?? ""
         return [text(log.split(separator: "\n").suffix(args["lines"] as? Int ?? 50).joined(separator: "\n"))]
@@ -129,6 +149,16 @@ func requestSnapshot(_ seconds: TimeInterval) throws -> Bool {
     try? FileManager.default.removeItem(at: snapshotFile)
     try post("snapshot")
     return wait(seconds, until: { FileManager.default.fileExists(atPath: snapshotFile.path) })
+}
+
+/// Asks the app to describe its panes.
+func requestLayout() throws -> String {
+    try? FileManager.default.removeItem(at: layoutFile)
+    try post("layout")
+    guard wait(5, until: { FileManager.default.fileExists(atPath: layoutFile.path) }) else {
+        throw ToolError(message: "No layout arrived; is the test copy running?")
+    }
+    return try String(contentsOf: layoutFile, encoding: .utf8)
 }
 
 /// Sends an action to the test copy's DevHooks, which listens on its own bundle ID + ".dev".
