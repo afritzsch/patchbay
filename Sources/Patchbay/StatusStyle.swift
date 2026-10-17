@@ -52,6 +52,14 @@ extension TerminalSession {
         return nil
     }
 
+    /// What identifies the session in a list: its name if it has one, else what the agent was asked, else the folder.
+    /// Sessions in one folder all look alike by `displayName`.
+    var rowTitle: String {
+        if let customName, !customName.isEmpty { return customName }
+        if agent != nil, let topic = lastPrompt ?? (title.isEmpty ? nil : title) { return topic }
+        return displayName
+    }
+
     var abbreviatedCwd: String {
         (cwd as NSString).abbreviatingWithTildeInPath
     }
