@@ -39,8 +39,8 @@ final class TerminalSession: Identifiable {
         return folder.isEmpty ? state.cwd : folder
     }
 
-    init(id: UUID = UUID(), directory: String, name: String?, initialCommand: String?, agent: Agent? = nil,
-         claudeSessionID: String? = nil, fontSize: CGFloat) {
+    init(id: UUID, directory: String, name: String?, initialCommand: String?, agent: Agent?,
+         claudeSessionID: String?, fontSize: CGFloat) {
         self.id = id
         self.customName = name
         state = SessionState(cwd: directory, agent: agent, claudeSessionID: claudeSessionID)

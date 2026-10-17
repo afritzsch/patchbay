@@ -9,7 +9,6 @@ struct HistoryView: View {
     private static let shownLimit = 2000
 
     var body: some View {
-        @Bindable var store = store
         let entries = filtered
         VStack(spacing: 0) {
             filterBar(matching: entries.count)
@@ -178,19 +177,22 @@ private struct HistoryRow: View {
         case .claudeFinished: return "Claude finished" + (entry.duration.map { " · took \(Self.duration($0))" } ?? "")
         case .claudeNeedsInput: return "Claude asked"
         case .command:
-            var text = entry.exitCode.map { $0 == 0 ? "Command" : "Command failed (exit \($0))" } ?? "Command"
+            var text = failedCode.map { "Command failed (exit \($0))" } ?? "Command"
             if let duration = entry.duration, duration >= 1 { text += " · \(Self.duration(duration))" }
             return text
         case .sessionOpened, .sessionClosed, .movedIn: return "Session"
         }
     }
 
+    /// A command's exit code when it failed.
+    private var failedCode: Int? { entry.exitCode.flatMap { $0 == 0 ? nil : $0 } }
+
     private var symbol: String {
         switch entry.kind {
         case .prompt: "text.bubble"
         case .claudeFinished: "checkmark.circle.fill"
         case .claudeNeedsInput: "exclamationmark.bubble.fill"
-        case .command: entry.exitCode.map { $0 == 0 } ?? true ? "chevron.right.square" : "xmark.square"
+        case .command: failedCode == nil ? "chevron.right.square" : "xmark.square"
         case .sessionOpened: "plus.circle"
         case .sessionClosed: "minus.circle"
         case .movedIn: "arrow.down.forward.square"
@@ -202,7 +204,7 @@ private struct HistoryRow: View {
         case .prompt: .purple
         case .claudeFinished: .green
         case .claudeNeedsInput: .orange
-        case .command: entry.exitCode.map { $0 == 0 } ?? true ? .blue : .red
+        case .command: failedCode == nil ? .blue : .red
         case .sessionOpened, .sessionClosed, .movedIn: .secondary
         }
     }

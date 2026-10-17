@@ -131,9 +131,7 @@ struct SessionState: Equatable {
                 }
             }
             command = nil
-            agent = nil
-            currentTool = nil
-            asksApproval = false
+            agentGone()
             setStatus(.idle, at: now)
             return effects + [.gitChanged]
         case .sessionStart:
@@ -200,10 +198,7 @@ struct SessionState: Equatable {
             }
             return effects
         case .sessionEnd:
-            agent = nil
-            currentTool = nil
-            runningSubagents = 0
-            asksApproval = false
+            agentGone()
             setStatus(.idle, at: now)
             return []
         }
@@ -213,6 +208,13 @@ struct SessionState: Equatable {
     private mutating func claudeEvent() {
         agent = .claude
         command = nil
+    }
+
+    private mutating func agentGone() {
+        agent = nil
+        currentTool = nil
+        runningSubagents = 0
+        asksApproval = false
     }
 
     private mutating func clearTurn() {
@@ -270,9 +272,7 @@ struct SessionState: Equatable {
     }
 
     mutating func processExited(_ code: Int32?, now: Date = Date()) {
-        agent = nil
-        currentTool = nil
-        asksApproval = false
+        agentGone()
         setStatus(.exited(code), at: now)
     }
 }

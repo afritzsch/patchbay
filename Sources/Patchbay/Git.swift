@@ -103,7 +103,7 @@ enum Git {
               let list = run(["branch", "--format=%(HEAD)%(refname:short)"], in: directory) else { return nil }
         // "*main", " other"; a detached HEAD is listed as "*(HEAD detached at 1234567)".
         let lines = list.split(separator: "\n").filter { !$0.dropFirst().hasPrefix("(") }
-        let root = (common.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).deletingLastPathComponent
+        let root = (common as NSString).deletingLastPathComponent
         let setup = FileManager.default.contents(atPath: root + "/.patchbay.json")
             .flatMap { try? JSONDecoder().decode(WorktreeSetup.self, from: $0) }
         return GitRepo(root: root, current: lines.first { $0.hasPrefix("*") }.map { String($0.dropFirst()) },
@@ -211,9 +211,9 @@ enum Git {
 
     /// Deletes a worktree with its uncommitted changes, then its branch unless that has unmerged commits.
     static func removeWorktree(_ path: String) -> String? {
-        guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) else { return "\(path) isn't a git worktree." }
-        let branch = run(["branch", "--show-current"], in: path)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)
+        else { return "\(path) isn't a git worktree." }
+        let branch = run(["branch", "--show-current"], in: path) ?? ""
         if let error = perform(["worktree", "remove", "--force", path], in: common, timeout: 30) { return error }
         if !branch.isEmpty { _ = perform(["branch", "-d", branch], in: common) }
         return nil
@@ -226,10 +226,11 @@ enum Git {
         return status == 0 ? nil : output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Runs git and returns its output, or nil when it fails or takes longer than 2 s.
+    /// Runs git and returns its output without the final newline, or nil when it fails or takes longer than 2 s.
+    /// Only newlines are trimmed: `git branch` lists start with a space.
     private static func run(_ arguments: [String], in directory: String) -> String? {
         guard let (status, output) = execute(arguments, in: directory, timeout: 2, mergeErrors: false) else { return nil }
-        return status == 0 ? output : nil
+        return status == 0 ? output.trimmingCharacters(in: .newlines) : nil
     }
 
     /// `--no-optional-locks`: a plain `git status` takes index.lock, which would make an agent's own `git commit` fail.

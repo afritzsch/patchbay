@@ -51,19 +51,20 @@ extension TerminalSession {
             return message
         }
         if let message = state.message, state.unseen { return message }
-        if state.agent != nil {
-            if let lastPrompt = state.lastPrompt { return lastPrompt }
-            if !title.isEmpty { return title }
-        }
-        return nil
+        return topic
+    }
+
+    /// What the agent was asked, or else the title it gave the terminal.
+    private var topic: String? {
+        guard state.agent != nil else { return nil }
+        return state.lastPrompt ?? (title.isEmpty ? nil : title)
     }
 
     /// What identifies the session in a list: its name if it has one, else what the agent was asked, else the folder.
     /// Sessions in one folder all look alike by `displayName`.
     var rowTitle: String {
         if let customName, !customName.isEmpty { return customName }
-        if state.agent != nil, let topic = state.lastPrompt ?? (title.isEmpty ? nil : title) { return topic }
-        return displayName
+        return topic ?? displayName
     }
 
     var abbreviatedCwd: String {

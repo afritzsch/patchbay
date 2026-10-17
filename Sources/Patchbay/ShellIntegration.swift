@@ -33,26 +33,18 @@ enum ShellIntegration {
 
     static func install() throws {
         let fm = FileManager.default
+        try? fm.removeItem(at: eventsDir) // Event files of sessions from a previous run are stale.
         try fm.createDirectory(at: eventsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: zdotDir, withIntermediateDirectories: true)
-
-        // Event files of sessions from a previous run are stale.
-        for file in (try? fm.contentsOfDirectory(at: eventsDir, includingPropertiesForKeys: nil)) ?? [] {
-            try? fm.removeItem(at: file)
-        }
 
         try hookScriptSource.write(to: hookScript, atomically: true, encoding: .utf8)
         try statusLineSource.write(to: statusLineScript, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: statusLineScript.path)
-        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookScript.path)
 
         let command = "/bin/sh '\(hookScript.path)'"
-        var hooks: [String: Any] = [:]
-        for event in SessionEvent.hooks {
-            var entry: [String: Any] = ["hooks": [["type": "command", "command": "\(command) \(event.rawValue)", "timeout": 5]]]
-            if event == .preToolUse || event == .postToolUse { entry["matcher"] = "*" }
-            hooks[event.rawValue] = [entry]
-        }
+        let hooks = Dictionary(uniqueKeysWithValues: SessionEvent.hooks.map {
+            ($0.rawValue, [["hooks": [["type": "command", "command": "\(command) \($0.rawValue)", "timeout": 5]]]])
+        })
         let settings = try JSONSerialization.data(withJSONObject: ["hooks": hooks], options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try settings.write(to: claudeSettings, options: .atomic)
 
@@ -82,7 +74,7 @@ enum ShellIntegration {
         env["PATCHBAY_EVENTS_DIR"] = eventsDir.path
         env["PATCHBAY_CLAUDE_SETTINGS"] = claudeSettings.path
         if shellIsZsh {
-            if let userZdotdir = env["ZDOTDIR"] { env["PATCHBAY_USER_ZDOTDIR"] = userZdotdir }
+            env["PATCHBAY_USER_ZDOTDIR"] = env["ZDOTDIR"]
             env["ZDOTDIR"] = zdotDir.path
             if let initialCommand { env["PATCHBAY_INITIAL_COMMAND"] = initialCommand }
         }
@@ -105,7 +97,7 @@ enum ShellIntegration {
         exit 0
     fi
     payload=$(cat | tr '\n\r\t' '   ' | cut -c1-4000)
-    printf '%s\t%s\n' "$1" "$payload" >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events" 2>/dev/null
+    printf '%s\t%s\n' "$1" "$payload" 2>/dev/null >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events"
     exit 0
     """#
 
@@ -161,8 +153,8 @@ enum ShellIntegration {
         unset _pb_zdotdir PATCHBAY_USER_ZDOTDIR
 
         _pb_emit() {
-            print -r -- "$1"$'\t'"$2" >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events" 2>/dev/null
-        }
+            print -r -- "$1"$'\t'"$2" >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events"
+        } 2>/dev/null
         # The event names are SessionEvent's.
         _pb_preexec() { _pb_emit ShellExec "${1//$'\n'/ }" }
         _pb_precmd() { _pb_emit ShellPrompt "$?"$'\t'"$PWD" }
@@ -194,7 +186,7 @@ enum ShellIntegration {
                 print -s -- "$_pb_initial"
                 _pb_preexec "$_pb_initial"
                 eval "$_pb_initial"
-                _pb_emit ShellPrompt "$?"$'\t'"$PWD"
+                _pb_precmd
                 unset _pb_initial
             }
             add-zsh-hook precmd _pb_run_initial

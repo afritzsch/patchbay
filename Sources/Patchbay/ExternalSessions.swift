@@ -44,17 +44,19 @@ enum ExternalSessionScanner {
             if argv.count > 1, let first = argv.first, ["node", "bun"].contains((first as NSString).lastPathComponent) {
                 argv.removeFirst()
             }
-            guard kill(pid, 0) == 0, let executable = argv.first,
+            let chain = ancestors(of: pid)
+            guard let executable = argv.first,
                   (executable as NSString).lastPathComponent.hasPrefix("claude") || executable.contains("/claude"),
                   !argv.contains("-p"), !argv.contains("--print"),
-                  !ancestors(of: pid).contains(ownPID)
+                  !chain.contains(ownPID)
             else { continue }
             found.append(ExternalSession(
                 pid: pid,
                 sessionID: sessionID,
                 cwd: cwd,
                 busy: (json["status"] as? String) == "busy",
-                hostApp: hostApp(of: pid),
+                hostApp: chain.lazy.compactMap { NSRunningApplication(processIdentifier: $0) }
+                    .first { $0.activationPolicy == .regular }?.localizedName,
                 carriedArgs: carriedArgs(from: Array(argv.dropFirst()))
             ))
         }
@@ -84,21 +86,14 @@ enum ExternalSessionScanner {
 
     static func carriedArgs(from args: [String]) -> [String] {
         var kept: [String] = []
-        var index = 0
-        while index < args.count {
-            let arg = args[index]
-            let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
-            if ClaudeCode.carriedFlagOptions.contains(arg) {
+        var rest = args.makeIterator()
+        while let arg = rest.next() {
+            if ClaudeCode.carriedFlagOptions.contains(arg)
+                || arg.contains("=") && ClaudeCode.carriedValueOptions.contains(String(arg.prefix { $0 != "=" })) {
                 kept.append(arg)
-            } else if ClaudeCode.carriedValueOptions.contains(name) {
-                if arg.contains("=") {
-                    kept.append(arg)
-                } else if index + 1 < args.count {
-                    kept += [arg, args[index + 1]]
-                    index += 1
-                }
+            } else if ClaudeCode.carriedValueOptions.contains(arg), let value = rest.next() {
+                kept += [arg, value]
             }
-            index += 1
         }
         return kept
     }
@@ -120,15 +115,6 @@ enum ExternalSessionScanner {
             current = next
         }
         return chain
-    }
-
-    private static func hostApp(of pid: pid_t) -> String? {
-        for ancestor in ancestors(of: pid) {
-            if let app = NSRunningApplication(processIdentifier: ancestor), app.activationPolicy == .regular {
-                return app.localizedName
-            }
-        }
-        return nil
     }
 
     /// The process's argv, via KERN_PROCARGS2 (exact, unlike `ps` output).
