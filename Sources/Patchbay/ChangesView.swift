@@ -12,10 +12,11 @@ struct ChangesView: View {
     private var unstaged: [GitChange] { changes.filter(\.isUnstaged) }
 
     var body: some View {
+        @Bindable var store = store
         if let git = store.selectedSession?.git {
             VStack(spacing: 0) {
                 commitBox(git)
-                List {
+                List(selection: $store.selectedChange) {
                     if !staged.isEmpty {
                         Section {
                             ForEach(staged) { row($0, staged: true, root: git.root) }
@@ -41,6 +42,7 @@ struct ChangesView: View {
                 }
             }
             .task(id: git.root) { await refreshLoop(git.root) }
+            .onDisappear { store.selectedChange = nil }
             .confirmationDialog(
                 "Discard changes to \(discarding?.path ?? "")?",
                 isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }),
@@ -141,6 +143,7 @@ struct ChangesView: View {
             .buttonStyle(.borderless)
             .help(staged ? "Unstage" : "Stage")
         }
+        .tag(ChangeSelection(path: change.path, staged: staged, untracked: change.worktree == "?"))
         .help(change.path)
     }
 
@@ -155,6 +158,7 @@ struct ChangesView: View {
 
     private func refreshLoop(_ root: String) async {
         changes = []
+        store.selectedChange = nil
         while !Task.isCancelled {
             await reload(root)
             try? await Task.sleep(for: .seconds(2))

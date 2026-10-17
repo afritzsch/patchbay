@@ -3,12 +3,17 @@
 A Mac app for running several Claude Code sessions (and Codex, Gemini, other agents and plain shells) side by side,
 with a sidebar that shows what each one is doing.
 
-- **Sidebar**: every session with its status (*Working · Bash*, *Needs your input*, *Done*, *Running `npm test`*,
-  *Idle*), how long it's been in that state, the last prompt you gave Claude or the question it's asking, and
-  its folder. Drag to reorder, right-click to rename / open a sibling shell / show in Finder.
+- **Sidebar**: every session with its status (*Working · Bash*, *Waiting for agent*, *Needs your input*, *Done*,
+  *Running `npm test`*, *Idle*) and how long it's been in that state. Agent sessions are titled by the last prompt
+  you gave them (or the name you chose), so sessions in one folder are easy to tell apart; below that come the
+  question the agent is asking, if any, and the folder. Drag to reorder, right-click to rename / open a sibling
+  shell / show in Finder.
 - **Git state**: in a git repository, the folder line also shows the branch, the number of changed files
   (`●3`) and commits ahead of / behind the upstream (`↑1 ↓2`), in the sidebar, pane headers and overview cards.
   It refreshes every few seconds and right after a command or Claude's turn finishes, without taking git's locks.
+- **Changes**: the *Changes* tab at the top of the sidebar is source control for the focused session's repository.
+  Staged and unstaged files with per-file and bulk stage / unstage, discard (asks first), and a commit box (⌘↩).
+  Click a file to see its diff beside the panes.
 - **Split panes**: drag a session from the sidebar (or a pane by its title bar) onto a pane. Drop it on an
   edge to split left/right/top/bottom, or in the centre to swap it in. Drag the dividers to resize (double-click
   one to even them out); terminals reflow to their new size as you drag and when the window is resized. Clicking a
@@ -44,8 +49,8 @@ with a sidebar that shows what each one is doing.
 - **Attention**: sessions where Claude needs input or finished while you weren't looking get an orange dot, a
   dock badge, and a macOS notification. Clicking the notification opens that session. ⌘J jumps to the next one.
   Long shell commands (>10 s) that finish in the background are flagged too.
-- **Restore**: on relaunch, the pane layout comes back, sessions reopen in their last folder and Claude conversations resume
-  (`claude --resume <id>`). Both can be turned off in Settings (⌘,).
+- **Restore**: on relaunch, the pane layout comes back, sessions reopen in their last folder and Claude
+  conversations resume (`claude --resume <id>`). Both can be turned off in Settings (⌘,).
 
 ## Build & install
 
@@ -86,12 +91,14 @@ Nothing in your own config is modified. The app keeps its files in
   `claude` shell function that adds `--settings <app>/claude-settings.json`. `ZDOTDIR` is handed back afterwards,
   so nested shells behave normally.
 - `claude-settings.json`: Claude Code hooks (`SessionStart`, `UserPromptSubmit`, `Pre/PostToolUse`,
-  `Notification`, `Stop`, `SessionEnd`), merged by Claude with your own settings. Each hook runs
-- `claude-hook.sh`, which appends the event to `events/<session>.events`. The app reads these files.
-  Outside the app (no `PATCHBAY_SESSION_ID`), the script does nothing.
+  `Notification`, `Stop`, `SessionEnd`), merged by Claude with your own settings.
+- `claude-hook.sh`: what each hook runs. It appends the event to `events/<session>.events`, which the app reads.
+  Outside the app (no `PATCHBAY_SESSION_ID`) it does nothing.
+- `statusline.sh`: the Claude status line described under *Claude usage*. The app only writes the script; you
+  point `statusLine` in `~/.claude/settings.json` at it.
 
 Pressing Esc/Ctrl-C in Claude fires no hook, so a "working" session whose screen has been silent for 8 s is
-shown as waiting for a prompt again.
+shown as waiting for a prompt again (unless a subagent is running, which shows *Waiting for agent*).
 
 Other agents: Codex and Gemini are built in, and Settings → Other agents adds any command. A session counts as
 running an agent while that command (the first word of the command line, or the whole configured command) is in the
@@ -103,4 +110,7 @@ Limitations: the integration is zsh-only (other shells get a plain terminal; Cla
 don't report status). An alias named `claude` (Claude's local installer adds one) keeps working: the wrapper
 runs the alias's command with the app's settings added.
 
-Terminal emulation is [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
+## Development
+
+[ARCHITECTURE.md](ARCHITECTURE.md) walks through how the app is built, and [plans/](plans/README.md) holds the
+feature plans. Terminal emulation is [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).

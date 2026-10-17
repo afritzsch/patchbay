@@ -23,6 +23,15 @@ struct ContentView: View {
                 }
             }
             .toolbar { toolbar }
+            .inspector(isPresented: Binding(
+                get: { store.selectedChange != nil },
+                set: { if !$0 { store.selectedChange = nil } }
+            )) {
+                if let selection = store.selectedChange {
+                    DiffView(selection: selection)
+                        .inspectorColumnWidth(min: 300, ideal: 500, max: 900)
+                }
+            }
         }
         .navigationTitle(title)
         .navigationSubtitle(store.mode == .panes ? store.selectedSession?.abbreviatedCwd ?? "" : "")
