@@ -256,7 +256,7 @@ private struct PaneHeader: View {
         .font(.system(size: 11.5))
         .padding(.horizontal, 10)
         .frame(height: 26)
-        .background(isFocused ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.05))
+        .background(isFocused ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.05), ignoresSafeAreaEdges: [])
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.black.opacity(0.35)).frame(height: 1)
         }
