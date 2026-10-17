@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 extension UTType {
     /// A session dragged from the sidebar or a pane header.
-    static let terminalSession = UTType(exportedAs: "com.artemfritzsch.patchbay.session")
+    static let terminalSession = UTType(exportedAs: "app.patchbay.session")
 }
 
 extension NSPasteboard.PasteboardType {

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "patchbay-dev": {
+      "command": "swift",
+      "args": ["scripts/dev-mcp.swift"]
+    }
+  }
+}

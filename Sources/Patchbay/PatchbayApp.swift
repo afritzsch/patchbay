@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             UNUserNotificationCenter.current().delegate = self
             SessionStore.requestNotificationPermission()
         }
+        startDevHooks()
         // ⌘W closes the session, not the window, while the main window is in front.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
