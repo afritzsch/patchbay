@@ -62,6 +62,28 @@ struct SessionStateTests {
         #expect(state.status == .agentDone)
     }
 
+    /// What `wait_for` relies on: right after a prompt is sent, the session doesn't still look finished or ready.
+    @Test func sentPromptCountsAsWorking() {
+        var state = claudeReady()
+        _ = submit("hi", to: &state)
+        _ = state.apply(.stop, payload: "{}", visible: true, now: start)
+        state.promptSent("next", now: start)
+        #expect(state.status == .agentWorking)
+
+        var starting = SessionState(cwd: "/tmp", agent: .claude)
+        starting.promptSent("first", now: start)
+        _ = starting.apply(.shellExec, payload: "claude 'first'", visible: true, now: start)
+        _ = starting.apply(.sessionStart, payload: "{}", visible: true, now: start)
+        #expect(starting.status == .agentWorking)
+        _ = starting.apply(.sessionStart, payload: "{}", visible: true, now: start) // e.g. after /clear
+        #expect(starting.status == .agentReady)
+
+        var shell = SessionState(cwd: "/tmp")
+        _ = shell.apply(.shellPrompt, payload: "0\t/tmp", visible: true, now: start)
+        shell.promptSent("make", now: start)
+        #expect(shell.isWorking)
+    }
+
     @Test func silenceMeansInterrupted() {
         var state = claudeReady()
         _ = submit("go", to: &state)

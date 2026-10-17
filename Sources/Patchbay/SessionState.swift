@@ -66,6 +66,8 @@ struct SessionState: Equatable {
     /// The foreground command line and when it started, from `ShellExec` until `ShellPrompt`.
     private var command: Command?
     private var promptStarted: Date?
+    /// A prompt is on its way to an agent that hasn't started yet, so its start counts as working (see `promptSent`).
+    private var promptPending = false
 
     private struct Command: Equatable {
         var line: String
@@ -88,6 +90,14 @@ struct SessionState: Equatable {
     var isBusy: Bool {
         switch status {
         case .running, .agentWorking, .agentNeedsInput: true
+        default: false
+        }
+    }
+
+    /// Not waiting for anyone yet: what `wait_for` waits out.
+    var isWorking: Bool {
+        switch status {
+        case .starting, .running, .agentWorking: true
         default: false
         }
     }
@@ -139,7 +149,8 @@ struct SessionState: Equatable {
             hookEvent()
             claudeSessionID = json["session_id"] ?? claudeSessionID
             if let dir = json["cwd"] { cwd = dir }
-            setStatus(.agentReady, at: now)
+            setStatus(promptPending ? .agentWorking : .agentReady, at: now)
+            promptPending = false
             return []
         case .userPromptSubmit:
             let json = HookPayload(payload)
@@ -253,6 +264,17 @@ struct SessionState: Equatable {
     /// Without hooks, output that isn't the echo of typing means the agent is working again.
     mutating func outputReceived(sinceInput: TimeInterval, now: Date = Date()) {
         if status == .agentReady, agent?.hasHooks == false, sinceInput > 0.5 { setStatus(.agentWorking, at: now) }
+    }
+
+    /// A prompt was typed into the session or passed to its agent. Until the hooks or the output say more, it counts
+    /// as working, so whoever waits for the turn doesn't see the status from before it.
+    mutating func promptSent(_ text: String, now: Date = Date()) {
+        switch status {
+        case .starting, .running: promptPending = true // The agent hasn't started yet.
+        case .idle: setStatus(.running(text), at: now)
+        case .agentReady, .agentDone: setStatus(.agentWorking, at: now)
+        default: break
+        }
     }
 
     /// Answering a permission prompt: either a tool runs (PostToolUse follows) or Claude stops, which the

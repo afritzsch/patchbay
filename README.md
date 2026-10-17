@@ -53,6 +53,13 @@ with a sidebar that shows what each one is doing.
 - **Permission requests**: an agent asking to run a tool shows *Asks permission* and, for Claude, the request
   itself (*Bash: npm test*). Allow and Deny on the sidebar row or overview card, or ⌘Y / ⇧⌘Y for the selected
   session, type the agent's own answer keys into its terminal, where you can still answer any other way.
+- **Agents directing agents**: Claude in Patchbay's terminals gets Patchbay's own MCP tools, so you can ask one
+  session to split work across others: *"start three Claude sessions on branches fix-a, fix-b and fix-c, give
+  each one of these bugs, and tell me when they're done"*. The tools list sessions, read their output, start
+  agents (optionally in a new worktree), type into them, wait until they're done and close them. Sessions it
+  starts join its sidebar group (a group named after it if it had none) and don't take your focus. It can type
+  into and close only the sessions it started, and leaves their permission prompts to you. Looking around
+  needs no permission; starting, typing and closing ask, as Claude's tools do. Off in Settings.
 - **Restore**: on relaunch the pane layout, folders and Claude conversations come back. Both can be turned off
   in Settings (⌘,).
 
