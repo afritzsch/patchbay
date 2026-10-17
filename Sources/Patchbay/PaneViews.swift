@@ -200,12 +200,7 @@ struct PaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             PaneHeader(session: session, isFocused: isFocused, canClose: isSplit)
-            TerminalContainer(session: session, isFocused: isFocused)
-                .overlay {
-                    if isSplit && !isFocused {
-                        Color.black.opacity(0.18).allowsHitTesting(false)
-                    }
-                }
+            TerminalContainer(session: session, isFocused: isFocused, isDimmed: isSplit && !isFocused)
         }
         .background(Color(nsColor: Theme.terminalBackground))
     }
@@ -275,6 +270,8 @@ struct TerminalContainer: NSViewRepresentable {
     @Environment(SessionStore.self) private var store
     let session: TerminalSession
     let isFocused: Bool
+    /// Shades an unfocused pane. Drawn by the host: a SwiftUI overlay becomes a view in front of it that eats drops.
+    var isDimmed = false
     /// Whether drops on an edge split the pane. Off in the overview, where cards aren't panes.
     var splitsOnDrop = true
 
@@ -286,6 +283,7 @@ struct TerminalContainer: NSViewRepresentable {
         let id = session.id
         view.sessionID = id
         view.store = store
+        view.dim.isHidden = !isDimmed
         view.splitsOnDrop = splitsOnDrop
         view.show(session.terminal, focus: isFocused)
     }
@@ -296,7 +294,11 @@ final class TerminalHostView: NSView {
     weak var store: SessionStore?
     var splitsOnDrop = true
     private let inset = NSSize(width: 8, height: 6)
-    private let highlight = DropHighlightView()
+    let dim = OverlayView(fill: NSColor.black.withAlphaComponent(0.18))
+    /// Shown while this pane's session is dragged from the sidebar: dropping it elsewhere takes it out of here.
+    let leaving = OverlayView(fill: NSColor.black.withAlphaComponent(0.55), label: "Moves out of this pane")
+    private let highlight = OverlayView(fill: NSColor.controlAccentColor.withAlphaComponent(0.22),
+                                        border: NSColor.controlAccentColor.withAlphaComponent(0.8))
     private var zone: DropZone? {
         didSet { updateHighlight() }
     }
@@ -305,14 +307,18 @@ final class TerminalHostView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = Theme.terminalBackground.cgColor
+        dim.isHidden = true
+        leaving.isHidden = true
         highlight.isHidden = true
+        addSubview(dim)
+        addSubview(leaving)
         addSubview(highlight)
         registerForDraggedTypes([.terminalSession, .fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var terminal: NSView? { subviews.first { $0 !== highlight } }
+    private var terminal: NSView? { subviews.first { !($0 is OverlayView) } }
     /// The terminal this host shows, which may for a moment sit in another host.
     private weak var claimed: SessionTerminalView?
     private var wantsFocus = false
@@ -366,10 +372,10 @@ final class TerminalHostView: NSView {
 
     private func attach(_ terminal: NSView) {
         guard terminal.superview !== self else { return }
-        subviews.filter { $0 !== highlight }.forEach { $0.removeFromSuperview() }
+        self.terminal?.removeFromSuperview()
         terminal.removeFromSuperview()
         terminal.autoresizingMask = []
-        addSubview(terminal, positioned: .below, relativeTo: highlight)
+        addSubview(terminal, positioned: .below, relativeTo: dim)
         layoutTerminal()
     }
 
@@ -380,6 +386,8 @@ final class TerminalHostView: NSView {
 
     override func layout() {
         super.layout()
+        dim.frame = bounds
+        leaving.frame = bounds
         layoutTerminal()
         updateHighlight()
     }
@@ -500,15 +508,34 @@ final class TerminalHostView: NSView {
     }
 }
 
-/// The translucent box that shows where a drop will land. Never takes clicks or drops itself.
-private final class DropHighlightView: NSView {
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+/// A translucent box over a terminal: the dimming of an unfocused pane, the pane a drag takes its session out of,
+/// or where a drop will land. Never takes clicks or drops itself.
+final class OverlayView: NSView {
+    private var label: NSTextField?
+
+    init(fill: NSColor, border: NSColor? = nil, label text: String? = nil) {
+        super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
-        layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor
-        layer?.borderWidth = 2
-        layer?.cornerRadius = 6
+        layer?.backgroundColor = fill.cgColor
+        if let border {
+            layer?.borderColor = border.cgColor
+            layer?.borderWidth = 2
+            layer?.cornerRadius = 6
+        }
+        if let text {
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: 13, weight: .medium)
+            label.textColor = .white
+            addSubview(label)
+            self.label = label
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        guard let label else { return }
+        label.sizeToFit()
+        label.setFrameOrigin(NSPoint(x: (bounds.width - label.frame.width) / 2, y: (bounds.height - label.frame.height) / 2))
     }
 
     required init?(coder: NSCoder) { fatalError() }

@@ -176,10 +176,10 @@ struct SessionRow: View {
                         Circle().fill(.orange).frame(width: 7, height: 7)
                     }
                     if onScreen {
-                        Image(systemName: "rectangle.split.2x1")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .help("Shown in a pane")
+                        Image(systemName: "rectangle.split.2x1.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                            .help("Shown in a pane; dragging it moves it out of that pane")
                     }
                     ElapsedText(since: session.statusSince)
                         .font(.caption)
@@ -291,6 +291,8 @@ final class RowDragSourceView: NSView, NSDraggingSource {
     var onClick: (() -> Void)?
     /// Where the left button went down, until a drag starts.
     private var mouseDownLocation: NSPoint?
+    /// The pane the dragged session is shown in, marked while the drag lasts.
+    private weak var leavingPane: TerminalHostView?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let event = NSApp.currentEvent, event.type == .leftMouseDown,
@@ -320,6 +322,11 @@ final class RowDragSourceView: NSView, NSDraggingSource {
     private func beginDrag(with event: NSEvent) {
         guard let store, let payload else { return }
         store.dragged = payload
+        if case .session(let id) = payload, store.mode == .panes, store.layout?.contains(id) == true,
+           let pane = store.sessions.first(where: { $0.id == id })?.terminal.superview as? TerminalHostView {
+            pane.leaving.isHidden = false
+            leavingPane = pane
+        }
         let item = NSPasteboardItem()
         item.setData(Data(name.utf8), forType: .terminalSession)
         let draggingItem = NSDraggingItem(pasteboardWriter: item)
@@ -341,5 +348,9 @@ final class RowDragSourceView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .withinApplication ? [.move, .copy, .generic] : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        leavingPane?.leaving.isHidden = true
     }
 }
