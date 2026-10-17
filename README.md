@@ -22,8 +22,8 @@ with a sidebar that shows what each one is doing.
   branch, in `~/.patchbay/worktrees/<repo>/<branch>`), so several agents can work on one repository without
   getting in each other's way. The branch is named after the session; naming an existing branch checks it out.
   Right-click a session → *New Worktree Session…* does the same for its repository. Sessions in a worktree show
-  its branch with a dashed icon. Closing the last session in one asks whether to delete the worktree too (its
-  branch is kept if it has unmerged commits).
+  its branch with a dashed icon. Closing the last session in one, alone or among several selected, asks whether
+  to delete the worktree too (its branch is kept if it has unmerged commits).
   A new worktree lacks gitignored files. A `.patchbay.json` in the repository can copy them over and run a
   setup command before the agent starts; the sheet shows both before you start:
   ```json
