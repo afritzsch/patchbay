@@ -34,6 +34,23 @@ extension AppDelegate {
             }
             NSGraphicsContext.current = nil
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appending(path: "snapshot.png"))
+        case "drop": // "<session> <target> <left|right|top|bottom|center>", sessions numbered as in the sidebar from 1
+            let parts = arg.split(separator: " ")
+            guard parts.count == 3, let from = Int(parts[0]).map({ $0 - 1 }), let to = Int(parts[1]).map({ $0 - 1 }),
+                  store.sessions.indices.contains(from), store.sessions.indices.contains(to),
+                  let zone = ["left": DropZone.left, "right": .right, "top": .top, "bottom": .bottom, "center": .center][String(parts[2])]
+            else { return print("dev: bad drop \(arg)") }
+            store.drop(session: store.sessions[from].id, on: store.sessions[to].id, zone: zone)
+        case "layout":
+            // The pane tree with sessions numbered as in the sidebar, e.g. H[1:0.50 V[2:0.50 3:0.50]:0.50], then each
+            // terminal's frame in window points.
+            let numbers = Dictionary(uniqueKeysWithValues: store.sessions.enumerated().map { ($1.id, "\($0 + 1)") })
+            var lines = [store.layout.map { describe($0, numbers) } ?? "no panes"]
+            for (index, session) in store.sessions.enumerated() where session.terminal.window != nil {
+                lines.append("terminal \(index + 1): \(session.terminal.convert(session.terminal.bounds, to: nil))")
+            }
+            try? lines.joined(separator: "\n").write(to: URL(fileURLWithPath: dir).appending(path: "layout.txt"),
+                                                      atomically: true, encoding: .utf8)
         case "type":
             store.selectedSession?.terminal.send(txt: arg)
         case "menu":
@@ -43,6 +60,17 @@ extension AppDelegate {
             menu.performActionForItem(at: index)
         default:
             print("dev: unknown action \(action ?? "nil")")
+        }
+    }
+
+    /// H[…] is a row, V[…] a column; each child is followed by its share.
+    private func describe(_ node: PaneLayout, _ numbers: [UUID: String]) -> String {
+        switch node {
+        case .pane(let id): numbers[id] ?? "?"
+        case .split(_, let axis, let children, let fractions):
+            "\(axis == .horizontal ? "H" : "V")[" + zip(children, fractions).map {
+                "\(describe($0, numbers)):\(String(format: "%.2f", $1))"
+            }.joined(separator: " ") + "]"
         }
     }
 
