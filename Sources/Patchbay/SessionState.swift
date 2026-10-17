@@ -24,6 +24,7 @@ enum SessionEvent: String, CaseIterable {
     case userPromptSubmit = "UserPromptSubmit"
     case preToolUse = "PreToolUse"
     case postToolUse = "PostToolUse"
+    case permissionRequest = "PermissionRequest"
     case notification = "Notification"
     case stop = "Stop"
     case sessionEnd = "SessionEnd"
@@ -54,6 +55,10 @@ struct SessionState: Equatable {
     /// Latest Claude notification, or what a finished command did.
     private(set) var message: String?
     private(set) var currentTool: String?
+    /// The agent shows its permission prompt (from its hooks or seen on screen).
+    private(set) var asksApproval = false
+    /// What it asks to run ("Bash: npm test"), when its hooks say.
+    private(set) var approvalRequest: String?
     /// Subagent calls (Task/Agent tool) that have started but not finished.
     private(set) var runningSubagents = 0
     /// Something happened the user hasn't looked at yet (Claude finished, a long command ended, a bell).
@@ -128,6 +133,7 @@ struct SessionState: Equatable {
             command = nil
             agent = nil
             currentTool = nil
+            asksApproval = false
             setStatus(.idle, at: now)
             return effects + [.gitChanged]
         case .sessionStart:
@@ -161,8 +167,15 @@ struct SessionState: Equatable {
             claudeEvent()
             if ClaudeCode.isSubagentTool(HookPayload(payload)["tool_name"]) { runningSubagents = max(0, runningSubagents - 1) }
             currentTool = nil
+            asksApproval = false
             setStatus(.agentWorking, at: now)
             return [.gitChanged]
+        case .permissionRequest:
+            claudeEvent()
+            asksApproval = true
+            approvalRequest = ClaudeCode.requestSummary(HookPayload(payload))
+            setStatus(.agentNeedsInput, at: now)
+            return []
         case .notification:
             let json = HookPayload(payload)
             claudeEvent()
@@ -170,7 +183,7 @@ struct SessionState: Equatable {
                 if status != .agentDone, status != .agentNeedsInput, runningSubagents == 0 { setStatus(.agentReady, at: now) }
                 return []
             }
-            let text = json["message"] ?? "Claude needs your attention"
+            let text = (asksApproval ? approvalRequest.map { "Allow \($0)?" } : nil) ?? json["message"] ?? "Claude needs your attention"
             message = text
             setStatus(.agentNeedsInput, at: now)
             return [.record(.claudeNeedsInput, text), .alert(text)]
@@ -190,6 +203,7 @@ struct SessionState: Equatable {
             agent = nil
             currentTool = nil
             runningSubagents = 0
+            asksApproval = false
             setStatus(.idle, at: now)
             return []
         }
@@ -205,6 +219,22 @@ struct SessionState: Equatable {
         message = nil
         currentTool = nil
         runningSubagents = 0
+        asksApproval = false
+        approvalRequest = nil
+    }
+
+    /// Whether the permission prompt of an agent without hooks is on screen, checked when its output pauses.
+    mutating func approvalPrompt(shown: Bool, now: Date = Date()) -> [Effect] {
+        guard shown != asksApproval, let agent else { return [] }
+        asksApproval = shown
+        guard shown else {
+            if status == .agentNeedsInput { setStatus(.agentWorking, at: now) } // Answered in the terminal.
+            return []
+        }
+        setStatus(.agentNeedsInput, at: now)
+        let text = "\(agent.name) asks for permission"
+        message = text
+        return [.alert(text)]
     }
 
     /// A working session that has been silent for a while was interrupted and is waiting for the user.
@@ -227,6 +257,7 @@ struct SessionState: Equatable {
     mutating func inputSent(now: Date = Date()) {
         if status == .agentNeedsInput {
             message = nil
+            asksApproval = false
             setStatus(.agentWorking, at: now)
         }
     }
@@ -241,6 +272,7 @@ struct SessionState: Equatable {
     mutating func processExited(_ code: Int32?, now: Date = Date()) {
         agent = nil
         currentTool = nil
+        asksApproval = false
         setStatus(.exited(code), at: now)
     }
 }

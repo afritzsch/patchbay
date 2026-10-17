@@ -18,6 +18,7 @@ final class TerminalSession: Identifiable {
     @ObservationIgnored let terminal: SessionTerminalView
     @ObservationIgnored private var lastOutput = Date()
     @ObservationIgnored private var lastInput = Date.distantPast
+    @ObservationIgnored private var screenChecked = Date.distantPast
     @ObservationIgnored private var eventReader: EventFileReader?
     /// For shells without the integration: typed in once the shell first prints something.
     @ObservationIgnored private var pendingCommand: String?
@@ -105,6 +106,22 @@ final class TerminalSession: Identifiable {
 
     func checkForSilence() {
         update { $0.checkForSilence(lastOutput: lastOutput) }
+    }
+
+    /// Looks for the permission prompt of an agent without hooks on screen, once its output pauses.
+    func checkForApprovalPrompt() {
+        guard let agent = state.agent, !agent.hasHooks, let approval = agent.approval,
+              lastOutput > screenChecked, Date().timeIntervalSince(lastOutput) > 0.5 else { return }
+        screenChecked = Date()
+        let screen = terminal.getTerminal()
+        let text = (0..<screen.rows).compactMap { screen.getLine(row: $0)?.translateToString(trimRight: true) }
+        perform(update { $0.approvalPrompt(shown: approval.isShown(on: text.joined(separator: "\n"))) })
+    }
+
+    /// Answers the permission prompt by typing the agent's own keys, as the user would.
+    func answerApproval(allow: Bool) {
+        guard state.asksApproval, let approval = state.agent?.approval else { return }
+        terminal.send(txt: Agent.Approval.keys(allow ? approval.allow : approval.deny))
     }
 
     func markSeen() {

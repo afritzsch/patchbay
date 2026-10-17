@@ -177,16 +177,27 @@ struct SettingsView: View {
             }
             Section("Other agents") {
                 ForEach($customAgents) { $agent in
-                    HStack {
-                        TextField("Name", text: $agent.name)
-                        TextField("Command", text: $agent.command)
-                        Button("Remove", systemImage: "minus.circle") { customAgents.removeAll { $0.id == agent.id } }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
+                    VStack {
+                        HStack {
+                            TextField("Name", text: $agent.name)
+                            TextField("Command", text: $agent.command)
+                            Button("Remove", systemImage: "minus.circle") { customAgents.removeAll { $0.id == agent.id } }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                        }
+                        let approval = Binding { agent.approval ?? Agent.Approval(prompt: "", allow: "1", deny: "esc") }
+                            set: { agent.approval = $0 }
+                        HStack {
+                            TextField("Permission prompt text", text: approval.prompt)
+                            TextField("Allow keys", text: approval.allow).frame(width: 70)
+                            TextField("Deny keys", text: approval.deny).frame(width: 70)
+                        }
                     }
                 }
                 Button("Add Agent") { customAgents.append(Agent(id: UUID().uuidString, name: "", command: "")) }
-                Text("Codex and Gemini are built in. Any command added here shows as working while it runs.")
+                Text("Codex and Gemini are built in. Any command added here shows as working while it runs. "
+                     + "With text from its permission prompt, Patchbay sees it asking and can answer with the keys "
+                     + "given (esc and enter stand for those keys).")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
