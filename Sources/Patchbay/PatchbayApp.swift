@@ -31,10 +31,10 @@ private struct AppCommands: Commands {
             Button("New Shell Here") { store.newShellHere() }
                 .keyboardShortcut("t")
             Divider()
+            // No ⌘W here: menu shortcuts fire in every window. AppDelegate's key monitor takes ⌘W in the main window.
             Button("Close Session") {
                 if let session = store.selectedSession { store.confirmAndClose(session) }
             }
-            .keyboardShortcut("w")
             .disabled(store.selectedSession == nil)
         }
         CommandMenu("Pane") {

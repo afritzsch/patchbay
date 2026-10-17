@@ -42,7 +42,7 @@ enum Git {
     /// nil when `directory` isn't in a git repository. Blocking: call off the main thread.
     static func info(at directory: String) -> GitInfo? {
         guard let root = run(["rev-parse", "--show-toplevel"], in: directory)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let status = run(["status", "--porcelain=v2", "--branch"], in: directory) else { return nil }
+              let status = run(["status", "--porcelain=v2", "--branch", "--untracked-files=all"], in: directory) else { return nil }
         return parse(status: status, root: root)
     }
 
@@ -88,8 +88,10 @@ enum Git {
 
     /// The diff of one file, from either the staged or the unstaged side. nil when git fails.
     static func diff(of selection: ChangeSelection, in root: String) -> String? {
-        let arguments = selection.untracked ? ["diff", "--no-index", "--", "/dev/null", selection.path]
-            : ["diff"] + (selection.staged ? ["--cached"] : []) + ["--", selection.path]
+        // Plain output whatever the user's config says (external diff tools, color.ui = always).
+        let diff = ["diff", "--no-ext-diff", "--no-color"]
+        let arguments = selection.untracked ? diff + ["--no-index", "--", "/dev/null", selection.path]
+            : diff + (selection.staged ? ["--cached"] : []) + ["--", selection.path]
         // --no-index exits with 1 when the files differ.
         guard let (status, output) = execute(arguments, in: root, timeout: 5, mergeErrors: false), status <= 1 else { return nil }
         return output
@@ -98,7 +100,8 @@ enum Git {
     /// Reads `git diff` output for one file: skips the `diff --git` header and numbers the lines of each hunk.
     /// Output without hunks (binary files, mode changes) comes back as notes.
     static func parseDiff(_ diff: String) -> [DiffLine] {
-        let all = diff.split(separator: "\n")
+        // Not split(separator: "\n"): a String keeps "\r\n" as one Character, so CRLF files wouldn't split.
+        let all = diff.split(whereSeparator: \.isNewline)
         guard let start = all.firstIndex(where: { $0.hasPrefix("@@") }) else {
             return all.enumerated().map { DiffLine(id: $0, kind: .note, text: String($1)) }
         }
@@ -169,9 +172,17 @@ enum Git {
         guard (try? process.run()) != nil else { return nil }
         let kill = DispatchWorkItem { process.terminate() }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: kill)
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        // Read on another thread: children of git (hooks) can keep the pipe open after git has exited or been
+        // killed, and reading to the end would wait for them too.
+        nonisolated(unsafe) var data = Data()
+        let read = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            read.signal()
+        }
         process.waitUntilExit()
         kill.cancel()
+        guard read.wait(timeout: .now() + 1) == .success else { return (process.terminationStatus, "") }
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 }

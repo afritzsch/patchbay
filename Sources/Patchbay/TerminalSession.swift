@@ -199,13 +199,14 @@ final class TerminalSession: Identifiable {
             claudeEvent()
             if Self.isSubagentTool(HookPayload(payload)["tool_name"]) { runningSubagents = max(0, runningSubagents - 1) }
             currentTool = nil
+            gitStale = true
             setStatus(.agentWorking)
         case "Notification":
             claudeEvent()
             let text = HookPayload(payload)["message"] ?? "Claude needs your attention"
             if text.localizedCaseInsensitiveContains("waiting for your input") {
                 // The idle reminder after a finished turn, not a question.
-                if status != .agentDone, runningSubagents == 0 { setStatus(.agentReady) }
+                if status != .agentDone, status != .agentNeedsInput, runningSubagents == 0 { setStatus(.agentReady) }
                 return
             }
             message = text

@@ -200,13 +200,12 @@ private struct HistoryRow: View {
         }
     }
 
-    /// The Claude conversation can be resumed when its session is closed (or no longer running it).
+    /// The Claude conversation can be resumed when nothing runs it, here or in another terminal.
     private var canResume: Bool {
         guard let id = entry.claudeSessionID, [.prompt, .claudeFinished, .claudeNeedsInput].contains(entry.kind) else {
             return false
         }
-        if let session, session.isClaude, session.claudeSessionID == id { return false }
-        return ClaudeTranscripts.exist(for: id)
+        return !store.isRunning(claudeConversation: id) && ClaudeTranscripts.exist(for: id)
     }
 
     @ViewBuilder
