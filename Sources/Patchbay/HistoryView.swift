@@ -216,7 +216,7 @@ private struct HistoryRow: View {
         }
         if canResume, let id = entry.claudeSessionID {
             Button("Resume This Conversation") {
-                store.newSession(directory: entry.directory, name: entry.sessionName, claude: true, resumeClaudeID: id)
+                store.newSession(directory: entry.directory, name: entry.sessionName, agent: .claude, resumeClaudeID: id)
             }
         }
         if entry.kind == .command, let session, !session.isBusy {
@@ -231,8 +231,8 @@ private struct HistoryRow: View {
         }
         Divider()
         Button("Show Only This Session") { store.historySessionFilter = entry.sessionID }
-        Button("New Shell in This Folder") { store.newSession(directory: entry.directory, claude: false) }
-        Button("New Claude Session in This Folder") { store.newSession(directory: entry.directory, claude: true) }
+        Button("New Shell in This Folder") { store.newSession(directory: entry.directory, agent: nil) }
+        Button("New \(store.menuAgent.name) Session in This Folder") { store.newSession(directory: entry.directory, agent: store.menuAgent) }
     }
 
     private func goToSession() {

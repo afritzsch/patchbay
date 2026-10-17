@@ -3,7 +3,7 @@ import SwiftUI
 struct NewSessionSheet: View {
     @Environment(SessionStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(SessionStore.Keys.startClaude) private var startClaude = true
+    @AppStorage(SessionStore.Keys.startAgent) private var startAgent = "claude"
     @State private var directory = ""
     @State private var name = ""
     @State private var prompt = ""
@@ -22,8 +22,11 @@ struct NewSessionSheet: View {
                 TextField("Name", text: $name, prompt: Text((directory as NSString).lastPathComponent))
             }
             Section {
-                Toggle("Start Claude Code", isOn: $startClaude)
-                if startClaude {
+                Picker("Start", selection: $startAgent) {
+                    Text("Shell").tag("shell")
+                    ForEach(Agent.all) { Text($0.name).tag($0.id) }
+                }
+                if let agent, agent.promptStyle != .unsupported {
                     TextField("First prompt", text: $prompt, prompt: Text("Optional"), axis: .vertical)
                         .lineLimit(2...5)
                 }
@@ -39,7 +42,7 @@ struct NewSessionSheet: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Start") {
                     store.newSession(directory: directory, name: name.isEmpty ? nil : name,
-                                     claude: startClaude, prompt: startClaude ? prompt : nil)
+                                     agent: agent, prompt: prompt)
                     dismiss()
                 }
                 .disabled(directory.isEmpty)
@@ -49,6 +52,8 @@ struct NewSessionSheet: View {
             directory = store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
         }
     }
+
+    private var agent: Agent? { Agent.named(startAgent) }
 
     private var directoryChoices: [String] {
         var dirs = store.recentDirectories
@@ -74,6 +79,7 @@ struct SettingsView: View {
     @AppStorage(SessionStore.Keys.resumeClaude) private var resumeClaude = true
     @AppStorage(SessionStore.Keys.notify) private var notify = true
     @Environment(SessionStore.self) private var store
+    @State private var customAgents = Agent.custom
 
     var body: some View {
         @Bindable var store = store
@@ -81,7 +87,7 @@ struct SettingsView: View {
             Toggle("Reopen sessions on launch", isOn: $restoreSessions)
             Toggle("Resume Claude conversations when reopening", isOn: $resumeClaude)
                 .disabled(!restoreSessions)
-            Toggle("Notify when Claude needs input or finishes", isOn: $notify)
+            Toggle("Notify when an agent needs input or finishes", isOn: $notify)
             Stepper("Font size: \(Int(store.fontSize)) pt", value: $store.fontSize, in: 9...28)
             Picker("Keep history for", selection: Bindable(store.history).retentionDays) {
                 Text("7 days").tag(7)
@@ -100,6 +106,21 @@ struct SettingsView: View {
                     if alert.runModal() == .alertFirstButtonReturn { store.history.clear() }
                 }
             }
+            Section("Other agents") {
+                ForEach($customAgents) { $agent in
+                    HStack {
+                        TextField("Name", text: $agent.name)
+                        TextField("Command", text: $agent.command)
+                        Button("Remove", systemImage: "minus.circle") { customAgents.removeAll { $0.id == agent.id } }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                    }
+                }
+                Button("Add Agent") { customAgents.append(Agent(id: UUID().uuidString, name: "", command: "")) }
+                Text("Codex and Gemini are built in. Any command added here shows as working while it runs.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             LabeledContent("Claude hooks") {
                 Text("Loaded with --settings in this app's terminals; your ~/.claude settings are untouched.")
                     .foregroundStyle(.secondary)
@@ -109,5 +130,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: customAgents) { Agent.custom = customAgents }
     }
 }

@@ -1,7 +1,7 @@
 # Patchbay
 
-A Mac app for running several Claude Code sessions (and plain shells) side by side, with a sidebar that
-shows what each one is doing.
+A Mac app for running several Claude Code sessions (and Codex, Gemini, other agents and plain shells) side by side,
+with a sidebar that shows what each one is doing.
 
 - **Sidebar**: every session with its status (*Working · Bash*, *Needs your input*, *Done*, *Running `npm test`*,
   *Idle*), how long it's been in that state, the last prompt you gave Claude or the question it's asking, and
@@ -62,9 +62,9 @@ You can also open `Package.swift` in Xcode.
 
 | | |
 |---|---|
-| ⌘N | New session… (folder, name, start Claude, optional first prompt) |
+| ⌘N | New session… (folder, name, shell or agent, optional first prompt) |
 | ⌘T | New shell in the current session's folder |
-| ⌘W | Close session (asks if Claude or a command is still running) |
+| ⌘W | Close session (asks if an agent or a command is still running) |
 | ⌘1…⌘9, ⇧⌘] / ⇧⌘[ | Switch sessions |
 | ⌘J | Next session that needs you |
 | ⌘D / ⇧⌘D | Split right / down (new shell in the same folder) |
@@ -92,6 +92,12 @@ Nothing in your own config is modified. The app keeps its files in
 
 Pressing Esc/Ctrl-C in Claude fires no hook, so a "working" session whose screen has been silent for 8 s is
 shown as waiting for a prompt again.
+
+Other agents: Codex and Gemini are built in, and Settings → Other agents adds any command. A session counts as
+running an agent while that command (the first word of the command line, or the whole configured command) is in the
+foreground. These agents have no hooks yet, so they show *Working* while their output flows (typing doesn't count)
+and *Waiting for prompt* after 8 s of silence; a bell and the long-command notification work as for any command.
+Claude has full status (tools, questions, done). Sessions with other agents restart them fresh when reopened.
 
 Limitations: the integration is zsh-only (other shells get a plain terminal; Claude sessions still start but
 don't report status). An alias named `claude` (Claude's local installer adds one) keeps working: the wrapper

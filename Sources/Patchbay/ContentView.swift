@@ -130,7 +130,7 @@ struct EmptyStateView: View {
         } actions: {
             Button("New Session…") { store.showNewSessionSheet = true }
                 .buttonStyle(.borderedProminent)
-            Button("New Shell") { store.newSession(directory: NSHomeDirectory(), claude: false) }
+            Button("New Shell") { store.newSession(directory: NSHomeDirectory(), agent: nil) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(.rect)

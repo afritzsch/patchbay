@@ -79,7 +79,7 @@ struct SidebarView: View {
     }
 
     private var summary: String {
-        let working = store.sessions.filter { $0.status == .claudeWorking || { if case .running = $0.status { true } else { false } }($0) }.count
+        let working = store.sessions.filter { $0.status == .agentWorking || { if case .running = $0.status { true } else { false } }($0) }.count
         var parts: [String] = []
         if working > 0 { parts.append("\(working) busy") }
         if store.attentionCount > 0 { parts.append("\(store.attentionCount) waiting") }
@@ -99,10 +99,10 @@ struct SidebarView: View {
         }
         Divider()
         Button("New Shell in This Folder") {
-            store.newSession(directory: session.cwd, claude: false)
+            store.newSession(directory: session.cwd, agent: nil)
         }
-        Button("New Claude Session in This Folder") {
-            store.newSession(directory: session.cwd, claude: true)
+        Button("New \(store.menuAgent.name) Session in This Folder") {
+            store.newSession(directory: session.cwd, agent: store.menuAgent)
         }
         Divider()
         Button("Show in Finder") {
@@ -138,8 +138,8 @@ struct SessionRow: View {
                     Text(session.displayName)
                         .fontWeight(session.needsAttention ? .semibold : .regular)
                         .lineLimit(1)
-                    if session.isClaude {
-                        Text("Claude")
+                    if let agent = session.agent {
+                        Text(agent.name)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
