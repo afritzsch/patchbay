@@ -59,6 +59,8 @@ struct SidebarView: View {
                         Text(summary).monospacedDigit()
                     }
                 }
+                // Sidebar headers run to the column edge; line up with the rows' trailing column instead.
+                .padding(.trailing, 14)
             }
             if !store.externalSessions.isEmpty {
                 Section {

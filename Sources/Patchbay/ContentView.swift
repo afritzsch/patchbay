@@ -17,7 +17,9 @@ struct ContentView: View {
                     OverviewView()
                 } else if let layout = store.layout {
                     LayoutNodeView(node: layout)
-                        .background(Color(nsColor: Theme.terminalBackground))
+                        // Terminal colour up to the window top, without a toolbar strip over the panes.
+                        .background(Color(nsColor: Theme.terminalBackground).ignoresSafeArea())
+                        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 } else {
                     EmptyStateView()
                 }
