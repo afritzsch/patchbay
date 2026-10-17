@@ -83,7 +83,8 @@ final class SessionStore {
         static let restoreSessions = "restoreSessions"
         static let resumeClaude = "resumeClaude"
         static let notify = "notify"
-        static let startClaude = "startClaude"
+        /// An agent's id, or "shell": what the new-session sheet starts.
+        static let startAgent = "startAgent"
     }
 
     var selectedSession: TerminalSession? {
@@ -95,8 +96,12 @@ final class SessionStore {
     }
 
     init() {
+        if let startClaude = UserDefaults.standard.object(forKey: "startClaude") as? Bool { // Replaced by startAgent.
+            UserDefaults.standard.set(startClaude ? "claude" : "shell", forKey: Keys.startAgent)
+            UserDefaults.standard.removeObject(forKey: "startClaude")
+        }
         UserDefaults.standard.register(defaults: [
-            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.startClaude: true,
+            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.startAgent: "claude",
         ])
         do {
             try ShellIntegration.install()
@@ -118,19 +123,22 @@ final class SessionStore {
     // MARK: - Sessions
 
     @discardableResult
-    func newSession(id: UUID = UUID(), directory: String, name: String? = nil, claude: Bool, prompt: String? = nil,
+    func newSession(id: UUID = UUID(), directory: String, name: String? = nil, agent: Agent?, prompt: String? = nil,
                     resumeClaudeID: String? = nil, claudeArgs: [String] = [], select: Bool = true,
                     splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
         var command: String?
-        if claude {
-            var parts = ["claude"]
+        if let agent {
+            var parts = [agent.command]
             if let resumeClaudeID { parts += ["--resume", ShellIntegration.quote(resumeClaudeID)] }
             parts += claudeArgs.map(ShellIntegration.quote)
-            if let prompt, !prompt.isEmpty { parts.append(ShellIntegration.quote(prompt)) }
+            if let prompt, !prompt.isEmpty, agent.promptStyle != .unsupported {
+                if agent.promptStyle == .interactiveFlag { parts.append("-i") }
+                parts.append(ShellIntegration.quote(prompt))
+            }
             command = parts.joined(separator: " ")
         }
         let dir = FileManager.default.fileExists(atPath: directory) ? directory : NSHomeDirectory()
-        let session = TerminalSession(id: id, directory: dir, name: name, initialCommand: command, startsClaude: claude,
+        let session = TerminalSession(id: id, directory: dir, name: name, initialCommand: command, agent: agent,
                                       claudeSessionID: resumeClaudeID, fontSize: fontSize)
         session.isVisible = { [weak self, weak session] in
             guard let self, let session else { return false }
@@ -154,7 +162,7 @@ final class SessionStore {
         if select {
             selectedID = session.id
             mode = .panes
-            record(.sessionOpened, session, text: claude ? (resumeClaudeID != nil ? "Resumed Claude conversation" : "Started Claude") : "Opened shell")
+            record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
         }
         save()
         return session
@@ -172,24 +180,32 @@ final class SessionStore {
         mode = .history
     }
 
+    /// What the new-session sheet started last: an agent, or nil for a plain shell.
+    var lastAgent: Agent? {
+        UserDefaults.standard.string(forKey: Keys.startAgent).flatMap(Agent.named)
+    }
+
+    /// The agent for "New … Session in This Folder" menu items: the last one, Claude if that was a plain shell.
+    var menuAgent: Agent { lastAgent ?? .claude }
+
     /// A new shell in the current session's directory.
     func newShellHere() {
-        newSession(directory: selectedSession?.cwd ?? NSHomeDirectory(), claude: false)
+        newSession(directory: selectedSession?.cwd ?? NSHomeDirectory(), agent: nil)
     }
 
     /// A new shell in the focused session's folder, in a new pane beside it.
     func split(_ zone: DropZone) {
         guard let current = selectedSession else {
-            newSession(directory: NSHomeDirectory(), claude: false)
+            newSession(directory: NSHomeDirectory(), agent: nil)
             return
         }
-        newSession(directory: current.cwd, claude: false, splitting: current.id, zone: zone)
+        newSession(directory: current.cwd, agent: nil, splitting: current.id, zone: zone)
     }
 
     func close(_ session: TerminalSession) {
         guard let index = sessions.firstIndex(where: { $0.id == session.id }) else { return }
         let paneOrder = layout?.sessionIDs ?? []
-        record(.sessionClosed, session, text: session.isClaude ? "Closed (Claude was running)" : "Closed")
+        record(.sessionClosed, session, text: session.agent.map { "Closed (\($0.name) was running)" } ?? "Closed")
         session.close()
         sessions.remove(at: index)
         layout = layout?.removing(session.id)
@@ -235,8 +251,7 @@ final class SessionStore {
                 return
             }
         }
-        newSession(directory: folder, claude: UserDefaults.standard.bool(forKey: Keys.startClaude),
-                   splitting: target, zone: zone)
+        newSession(directory: folder, agent: lastAgent, splitting: target, zone: zone)
     }
 
     /// Handles something dragged into the sidebar list at `index`.
@@ -285,7 +300,7 @@ final class SessionStore {
             self.movingPIDs.remove(external.pid)
             guard ended else { NSSound.beep(); return } // Resuming while it still runs would corrupt the conversation.
             let target = target.flatMap { self.layout?.contains($0) == true ? $0 : nil }
-            let session = self.newSession(directory: external.cwd, claude: true,
+            let session = self.newSession(directory: external.cwd, agent: .claude,
                                           resumeClaudeID: external.hasTranscript ? external.sessionID : nil,
                                           claudeArgs: external.carriedArgs, splitting: target, zone: zone)
             self.record(.movedIn, session, text: "Moved in from \(external.hostApp ?? "another terminal")")
@@ -366,12 +381,11 @@ final class SessionStore {
 
     /// Asks before closing a session that is still doing something.
     func confirmAndClose(_ session: TerminalSession) {
-        if session.isBusy || session.isClaude {
+        if session.isBusy || session.agent != nil {
             let alert = NSAlert()
             alert.messageText = "Close “\(session.displayName)”?"
-            alert.informativeText = session.isClaude
-                ? "Claude Code is still running in this session."
-                : "A command is still running in this session."
+            alert.informativeText = session.agent.map { "\($0.name) is still running in this session." }
+                ?? "A command is still running in this session."
             alert.addButton(withTitle: "Close")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -473,16 +487,18 @@ final class SessionStore {
         var id: UUID?
         var name: String?
         var directory: String
-        /// Claude was running in it; restored with `claude`, resuming `claudeSessionID` when there's a conversation.
-        var claude: Bool?
+        /// The agent running in it, restored by starting it again (Claude resumes `claudeSessionID` when there's a conversation).
+        var agentID: String?
         var claudeSessionID: String?
+        /// Saved by older versions instead of `agentID`.
+        var claude: Bool?
     }
 
     @ObservationIgnored private var lastSaved: [Data?] = []
 
     func save() {
         let saved = sessions.filter(\.isAlive).map {
-            SavedSession(id: $0.id, name: $0.customName, directory: $0.cwd, claude: $0.isClaude,
+            SavedSession(id: $0.id, name: $0.customName, directory: $0.cwd, agentID: $0.agent?.id,
                          claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil)
         }
         let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) }]
@@ -501,9 +517,11 @@ final class SessionStore {
         let resume = UserDefaults.standard.bool(forKey: Keys.resumeClaude)
         for item in saved {
             let wasClaude = item.claude ?? (item.claudeSessionID != nil)
+            var agent = (item.agentID ?? (wasClaude ? Agent.claude.id : nil)).flatMap(Agent.named)
+            if agent == .claude, !resume { agent = nil }
             let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
             newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
-                       claude: wasClaude && resume, resumeClaudeID: claudeID, select: false)
+                       agent: agent, resumeClaudeID: claudeID, select: false)
         }
         layout = savedLayout?.keeping(Set(sessions.map(\.id)))
         selectedID = layout?.sessionIDs.first ?? sessions.first?.id

@@ -7,10 +7,10 @@ extension TerminalSession {
         case .starting: "Starting"
         case .idle: "Idle"
         case .running: "Running"
-        case .claudeReady: "Waiting for prompt"
-        case .claudeWorking: currentTool.map { "Working · \($0)" } ?? "Working"
-        case .claudeNeedsInput: "Needs your input"
-        case .claudeDone: "Done"
+        case .agentReady: "Waiting for prompt"
+        case .agentWorking: currentTool.map { "Working · \($0)" } ?? "Working"
+        case .agentNeedsInput: "Needs your input"
+        case .agentDone: "Done"
         case .exited(let code): code.map { "Exited (\($0))" } ?? "Exited"
         }
     }
@@ -19,10 +19,10 @@ extension TerminalSession {
         switch status {
         case .starting, .idle, .exited: .secondary
         case .running: .blue
-        case .claudeReady: .teal
-        case .claudeWorking: .purple
-        case .claudeNeedsInput: .orange
-        case .claudeDone: .green
+        case .agentReady: .teal
+        case .agentWorking: .purple
+        case .agentNeedsInput: .orange
+        case .agentDone: .green
         }
     }
 
@@ -31,10 +31,10 @@ extension TerminalSession {
         case .starting: "hourglass"
         case .idle: "terminal"
         case .running: "play.circle.fill"
-        case .claudeReady: "sparkle"
-        case .claudeWorking: "sparkles"
-        case .claudeNeedsInput: "exclamationmark.bubble.fill"
-        case .claudeDone: "checkmark.circle.fill"
+        case .agentReady: "sparkle"
+        case .agentWorking: "sparkles"
+        case .agentNeedsInput: "exclamationmark.bubble.fill"
+        case .agentDone: "checkmark.circle.fill"
         case .exited: "xmark.circle"
         }
     }
@@ -42,9 +42,9 @@ extension TerminalSession {
     /// The most useful one-line detail: what's running, what Claude asked, or what it was asked.
     var detailLine: String? {
         if case .running(let command) = status { return command }
-        if status == .claudeNeedsInput, let message { return message }
+        if status == .agentNeedsInput, let message { return message }
         if let message, unseen { return message }
-        if isClaude {
+        if agent != nil {
             if let lastPrompt { return lastPrompt }
             if !title.isEmpty { return title }
         }
@@ -62,7 +62,7 @@ struct StatusIcon: View {
     var body: some View {
         Image(systemName: session.statusSymbol)
             .foregroundStyle(session.statusColor)
-            .symbolEffect(.pulse, options: .repeating, isActive: session.status == .claudeWorking || session.status == .claudeNeedsInput)
+            .symbolEffect(.pulse, options: .repeating, isActive: session.status == .agentWorking || session.status == .agentNeedsInput)
             .frame(width: 18)
     }
 }
