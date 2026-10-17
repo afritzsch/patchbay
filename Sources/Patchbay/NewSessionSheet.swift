@@ -41,6 +41,11 @@ struct NewSessionSheet: View {
                                 ForEach(repo.branches, id: \.self) { Text($0).tag($0) }
                             }
                         }
+                        if let setup = repo.setup {
+                            LabeledContent("Setup (.patchbay.json)") {
+                                Text(setupSummary(setup)).textSelection(.enabled)
+                            }
+                        }
                         if let error {
                             Text(error).foregroundStyle(.red)
                         }
@@ -75,7 +80,8 @@ struct NewSessionSheet: View {
             }
         }
         .onAppear {
-            directory = store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
+            directory = store.newSessionFolder ?? store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
+            store.newSessionFolder = nil
         }
         .task(id: directory) {
             let directory = directory
@@ -99,15 +105,27 @@ struct NewSessionSheet: View {
         let base = repo.branches.contains(branch) ? nil : base
         isWorking = true
         Task {
-            error = await inBackground { Git.addWorktree(in: directory, branch: branch, base: base, at: path) }
+            error = await inBackground {
+                let error = Git.addWorktree(in: directory, branch: branch, base: base, at: path)
+                if error == nil { repo.setup?.copyFiles(from: repo.root, to: path) }
+                return error
+            }
             isWorking = false
-            if error == nil { open(path) }
+            if error == nil { open(path, setup: repo.setup?.setup) }
         }
     }
 
-    private func open(_ folder: String) {
-        store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt)
+    private func open(_ folder: String, setup: String? = nil) {
+        store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt, setup: setup)
         dismiss()
+    }
+
+    /// What a new worktree gets from `.patchbay.json`, shown before it runs: the setup is a command from the repository.
+    private func setupSummary(_ setup: WorktreeSetup) -> String {
+        var parts: [String] = []
+        if let copy = setup.copy, !copy.isEmpty { parts.append("copies " + copy.joined(separator: ", ")) }
+        if let command = setup.setup { parts.append("runs " + command) }
+        return parts.joined(separator: "; ")
     }
 
     private var directoryChoices: [String] {

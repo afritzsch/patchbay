@@ -20,44 +20,47 @@ enum Ask {
 
 /// Store actions for the UI that ask first.
 extension SessionStore {
-    /// Asks before closing sessions that are still doing something.
+    /// Asks before closing sessions that are still doing something, or that leave a worktree this app made
+    /// unused, which it then offers to delete.
     func confirmAndClose(_ sessions: [TerminalSession]) {
-        if sessions.count == 1, let session = sessions.first, let git = session.git, git.isOwnWorktree,
-           !self.sessions.contains(where: { $0 !== session && $0.git?.root == git.root }) {
-            return confirmAndClose(session, worktree: git)
-        }
+        let closing = Set(sessions.map(\.id))
+        let worktrees = Dictionary(sessions.compactMap(\.git).filter { git in
+            git.isOwnWorktree && !self.sessions.contains { !closing.contains($0.id) && $0.git?.root == git.root }
+        }.map { ($0.root, $0) }, uniquingKeysWith: { first, _ in first }).values
         let running = sessions.filter { $0.isBusy || $0.agent != nil }
-        if sessions.count == 1, let session = running.first {
-            let info = session.agent.map { "\($0.name) is still running in this session." }
-                ?? "A command is still running in this session."
-            guard Ask.confirm("Close “\(session.displayName)”?", info, action: "Close") else { return }
-        } else if !running.isEmpty {
-            let info = "\(running.count) of them are still running an agent or a command."
-            guard Ask.confirm("Close \(sessions.count) sessions?", info, action: "Close All") else { return }
+        guard !running.isEmpty || !worktrees.isEmpty else { return sessions.forEach(close) }
+
+        let single = sessions.count == 1 ? sessions.first : nil
+        var info: [String] = []
+        if worktrees.count == 1, let git = worktrees.first {
+            info.append("\(single == nil ? "One of them has" : "It has") its own worktree on branch \(git.branch).")
+        } else if !worktrees.isEmpty {
+            info.append("\(worktrees.count) of them have their own worktrees: \(worktrees.map(\.branch).joined(separator: ", ")).")
         }
-        for session in sessions { close(session) }
+        let changed = worktrees.reduce(0) { $0 + $1.changed }
+        if changed > 0 {
+            info.append("Deleting \(worktrees.count == 1 ? "it" : "them") loses \(changed) uncommitted change\(changed == 1 ? "" : "s").")
+        }
+        if let single, !running.isEmpty {
+            info.append(single.agent.map { "\($0.name) is still running in this session." } ?? "A command is still running in this session.")
+        } else if !running.isEmpty {
+            info.append("\(running.count) of them are still running an agent or a command.")
+        }
+        var buttons = [single == nil ? "Close All" : "Close", "Cancel"]
+        if !worktrees.isEmpty { buttons.insert(worktrees.count == 1 ? "Close and Delete Worktree" : "Close and Delete Worktrees", at: 1) }
+        let choice = Ask.choose(single.map { "Close “\($0.displayName)”?" } ?? "Close \(sessions.count) sessions?",
+                                info.joined(separator: " "), buttons: buttons)
+        guard choice < buttons.count - 1 else { return }
+        sessions.forEach(close)
+        guard choice == 1 else { return }
+        let paths = worktrees.map(\.root)
+        Task {
+            let errors = await inBackground { paths.compactMap(Git.removeWorktree) }
+            if !errors.isEmpty { _ = Ask.choose("Couldn't delete the worktree", errors.joined(separator: "\n\n"), buttons: ["OK"]) }
+        }
     }
 
     func confirmAndClose(_ session: TerminalSession) { confirmAndClose([session]) }
-
-    /// The last session in a worktree this app made: close it and keep the worktree, or delete that too.
-    private func confirmAndClose(_ session: TerminalSession, worktree git: GitInfo) {
-        var info = "It has its own worktree on branch \(git.branch)."
-        if git.changed > 0 { info += " Deleting it loses \(git.changed) uncommitted change\(git.changed == 1 ? "" : "s")." }
-        if let agent = session.agent { info += "\n\n\(agent.name) is still running." }
-        else if session.isBusy { info += "\n\nA command is still running." }
-        let choice = Ask.choose("Close “\(session.displayName)”?", info,
-                                buttons: ["Close", "Close and Delete Worktree", "Cancel"])
-        guard choice < 2 else { return }
-        close(session)
-        guard choice == 1 else { return }
-        let path = git.root
-        Task {
-            if let error = await inBackground({ Git.removeWorktree(path) }) {
-                _ = Ask.choose("Couldn't delete the worktree", error, buttons: ["OK"])
-            }
-        }
-    }
 
     func confirmAndBringIn(_ external: ExternalSession, splitting target: UUID?, zone: DropZone) {
         var info = "Claude Code will quit in \(external.hostApp ?? "the other terminal") and the conversation "

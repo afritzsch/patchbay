@@ -35,8 +35,20 @@ struct GitParserTests {
     }
 
     @Test func worktreePath() {
-        let repo = GitRepo(name: "patchbay", current: "main", branches: ["main"])
+        let repo = GitRepo(root: "/src/patchbay", current: "main", branches: ["main"])
         #expect(repo.worktreePath(for: "patchbay/abc") == NSHomeDirectory() + "/.patchbay/worktrees/patchbay/patchbay/abc")
+    }
+
+    @Test func worktreeSetupCopiesExistingFiles() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: temp) }
+        try FileManager.default.createDirectory(atPath: temp + "/main/config", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: temp + "/worktree", withIntermediateDirectories: true)
+        try "SECRET=1".write(toFile: temp + "/main/config/.env", atomically: true, encoding: .utf8)
+        let setup = try JSONDecoder().decode(WorktreeSetup.self, from: Data(#"{"copy": ["config/.env", "missing"]}"#.utf8))
+        setup.copyFiles(from: temp + "/main", to: temp + "/worktree")
+        #expect(try String(contentsOfFile: temp + "/worktree/config/.env", encoding: .utf8) == "SECRET=1")
+        #expect(!FileManager.default.fileExists(atPath: temp + "/worktree/missing"))
     }
 
     @Test func detachedHead() {

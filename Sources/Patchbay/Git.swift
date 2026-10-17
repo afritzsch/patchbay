@@ -18,13 +18,34 @@ struct GitInfo: Equatable {
 
 /// A repository's local branches, for starting a session in a new worktree.
 struct GitRepo: Sendable {
-    /// The main checkout's folder name.
-    var name: String
+    /// The main checkout.
+    var root: String
     /// nil when HEAD is detached.
     var current: String?
     var branches: [String]
+    /// From `.patchbay.json` in the main checkout.
+    var setup: WorktreeSetup?
 
-    func worktreePath(for branch: String) -> String { "\(Git.worktreesFolder)/\(name)/\(branch)" }
+    func worktreePath(for branch: String) -> String {
+        "\(Git.worktreesFolder)/\((root as NSString).lastPathComponent)/\(branch)"
+    }
+}
+
+/// `.patchbay.json` in a repository: what a new worktree needs that git doesn't check out.
+struct WorktreeSetup: Codable, Sendable {
+    /// Files or folders copied from the main checkout, such as `.env`.
+    var copy: [String]?
+    /// Run in the new worktree before the agent starts, such as `npm install`.
+    var setup: String?
+
+    /// Copies the files that exist in `root` and are missing in `worktree`.
+    func copyFiles(from root: String, to worktree: String) {
+        for path in copy ?? [] {
+            let target = URL(fileURLWithPath: worktree).appendingPathComponent(path)
+            try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.copyItem(at: URL(fileURLWithPath: root).appendingPathComponent(path), to: target)
+        }
+    }
 }
 
 /// One line of `git status`: the status letters of the index and of the working tree (" " for none, "?" untracked).
@@ -82,10 +103,11 @@ enum Git {
               let list = run(["branch", "--format=%(HEAD)%(refname:short)"], in: directory) else { return nil }
         // "*main", " other"; a detached HEAD is listed as "*(HEAD detached at 1234567)".
         let lines = list.split(separator: "\n").filter { !$0.dropFirst().hasPrefix("(") }
-        let name = URL(fileURLWithPath: common.trimmingCharacters(in: .whitespacesAndNewlines))
-            .deletingLastPathComponent().lastPathComponent
-        return GitRepo(name: name, current: lines.first { $0.hasPrefix("*") }.map { String($0.dropFirst()) },
-                       branches: lines.map { String($0.dropFirst()) })
+        let root = (common.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).deletingLastPathComponent
+        let setup = FileManager.default.contents(atPath: root + "/.patchbay.json")
+            .flatMap { try? JSONDecoder().decode(WorktreeSetup.self, from: $0) }
+        return GitRepo(root: root, current: lines.first { $0.hasPrefix("*") }.map { String($0.dropFirst()) },
+                       branches: lines.map { String($0.dropFirst()) }, setup: setup)
     }
 
     /// Reads `git status --porcelain=v2 --branch -z`: `# branch.*` headers, then an entry per changed file, whose
@@ -182,7 +204,9 @@ enum Git {
 
     /// A worktree at `path` on a new `branch` starting at `base`, or on the existing `branch` when `base` is nil.
     static func addWorktree(in directory: String, branch: String, base: String?, at path: String) -> String? {
-        perform(["worktree", "add"] + (base.map { ["-b", branch, path, $0] } ?? [path, branch]), in: directory, timeout: 60)
+        // Forgets worktrees whose folders were deleted by hand; their branches would count as checked out.
+        _ = perform(["worktree", "prune"], in: directory)
+        return perform(["worktree", "add"] + (base.map { ["-b", branch, path, $0] } ?? [path, branch]), in: directory, timeout: 60)
     }
 
     /// Deletes a worktree with its uncommitted changes, then its branch unless that has unmerged commits.
