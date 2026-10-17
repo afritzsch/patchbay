@@ -75,6 +75,15 @@ final class SessionStore {
         UserDefaults.standard.set(overviewRowFractions, forKey: Preferences.Keys.overviewRowFractions)
     }
     var showNewSessionSheet = false
+    /// The folder the new-session sheet starts with, instead of the focused session's.
+    var newSessionFolder: String?
+
+    /// Opens the new-session sheet for `folder` with "New worktree" on.
+    func newWorktreeSession(in folder: String) {
+        UserDefaults.standard.set(true, forKey: Preferences.Keys.newWorktree)
+        newSessionFolder = folder
+        showNewSessionSheet = true
+    }
 
     var fontSize = CGFloat(UserDefaults.standard.double(forKey: Preferences.Keys.fontSize)) {
         didSet {
@@ -124,7 +133,7 @@ final class SessionStore {
 
     @discardableResult
     func newSession(id: UUID = UUID(), directory: String, name: String? = nil, agent: Agent?, prompt: String? = nil,
-                    resumeClaudeID: String? = nil, claudeArgs: [String] = [], select: Bool = true,
+                    setup: String? = nil, resumeClaudeID: String? = nil, claudeArgs: [String] = [], select: Bool = true,
                     splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
         var command: String?
         if let agent {
@@ -137,6 +146,7 @@ final class SessionStore {
             }
             command = parts.joined(separator: " ")
         }
+        if let setup { command = [setup, command].compactMap { $0 }.joined(separator: " && ") }
         let dir = FileManager.default.fileExists(atPath: directory) ? directory : NSHomeDirectory()
         let session = TerminalSession(id: id, directory: dir, name: name, initialCommand: command, agent: agent,
                                       claudeSessionID: resumeClaudeID, fontSize: fontSize)

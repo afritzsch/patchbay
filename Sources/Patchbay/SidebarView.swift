@@ -226,6 +226,9 @@ struct SessionMenu: View {
         Button("New \(store.menuAgent.name) Session in This Folder") {
             store.newSession(directory: session.cwd, agent: store.menuAgent)
         }
+        if session.git != nil {
+            Button("New Worktree Session…") { store.newWorktreeSession(in: session.cwd) }
+        }
         Divider()
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.cwd)])
