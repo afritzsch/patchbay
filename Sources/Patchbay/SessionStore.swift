@@ -117,10 +117,11 @@ final class SessionStore {
             MainActor.assumeIsolated { self?.tick() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.scanExternalSessions()
-                self?.refreshGit()
-            }
+            MainActor.assumeIsolated { self?.scanExternalSessions() }
+        })
+        // Sessions mark their git state stale when a command or tool finishes; this catches changes made elsewhere.
+        timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshGit(all: true) }
         })
         if UserDefaults.standard.bool(forKey: Keys.restoreSessions) { restore() }
     }
@@ -275,9 +276,18 @@ final class SessionStore {
 
     // MARK: - Sessions in other terminals
 
+    /// Off the main thread: the scan reads files and walks process trees.
     private func scanExternalSessions() {
-        let found = ExternalSessionScanner.scan().filter { !movingPIDs.contains($0.pid) }
-        if found != externalSessions { externalSessions = found }
+        Task {
+            let found = await Task.detached { ExternalSessionScanner.scan() }.value.filter { !movingPIDs.contains($0.pid) }
+            if found != externalSessions { externalSessions = found }
+        }
+    }
+
+    /// Whether a Claude conversation is open in a session here or in another terminal; resuming it a second
+    /// time would corrupt it.
+    func isRunning(claudeConversation id: String) -> Bool {
+        sessions.contains { $0.isClaude && $0.claudeSessionID == id } || externalSessions.contains { $0.sessionID == id }
     }
 
     @ObservationIgnored private var movingPIDs: Set<pid_t> = []
@@ -316,12 +326,14 @@ final class SessionStore {
 
     @ObservationIgnored private var gitRefreshInFlight = false
 
-    /// Reads the git state of every session's folder off the main thread; one `git` run per distinct folder.
-    private func refreshGit() {
-        guard !gitRefreshInFlight else { return }
+    /// Reads the git state of the stale sessions' folders (every session's with `all`) off the main thread;
+    /// one `git` run per distinct folder.
+    private func refreshGit(all: Bool = false) {
+        let refreshing = sessions.filter { all || $0.gitStale }
+        guard !gitRefreshInFlight, !refreshing.isEmpty else { return }
         gitRefreshInFlight = true
-        for session in sessions { session.gitStale = false }
-        let directories = Set(sessions.map(\.cwd))
+        for session in refreshing { session.gitStale = false }
+        let directories = Set(refreshing.map(\.cwd))
         Task {
             let infos = await Task.detached {
                 directories.reduce(into: [String: GitInfo]()) { $0[$1] = Git.info(at: $1) }

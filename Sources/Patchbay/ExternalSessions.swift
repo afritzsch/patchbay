@@ -1,4 +1,5 @@
 import AppKit
+import Synchronization
 
 /// An interactive Claude Code session running in another terminal app (Terminal, iTerm, …).
 struct ExternalSession: Identifiable, Equatable {
@@ -21,12 +22,18 @@ enum ClaudeTranscripts {
     /// Whether Claude has saved a conversation that `--resume` can open; a session nobody has typed into
     /// yet hasn't, and resuming it fails.
     static func exist(for sessionID: String) -> Bool {
+        if found.withLock({ $0.contains(sessionID) }) { return true }
         let projects = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects")
         let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects.path)) ?? []
-        return folders.contains {
+        let exists = folders.contains {
             FileManager.default.fileExists(atPath: projects.appendingPathComponent("\($0)/\(sessionID).jsonl").path)
         }
+        if exists { found.withLock { _ = $0.insert(sessionID) } }
+        return exists
     }
+
+    /// Transcripts seen before aren't looked up again (the history view asks for every row it draws).
+    private static let found = Mutex<Set<String>>([])
 }
 
 /// Finds Claude Code sessions outside this app through the registry Claude keeps in `~/.claude/sessions`,

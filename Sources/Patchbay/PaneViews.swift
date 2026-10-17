@@ -158,9 +158,10 @@ struct ResizeHandle: View {
     var background: Color = .clear
     var idleOpacity: Double = 0
     let onChanged: (CGFloat) -> Void
+    /// Also called when the drag is cancelled, which DragGesture's own onEnded misses.
     let onEnded: () -> Void
     let onDoubleClick: () -> Void
-    @State private var dragging = false
+    @GestureState private var dragging = false
     @State private var hovering = false
 
     var body: some View {
@@ -177,15 +178,12 @@ struct ResizeHandle: View {
         .onHover { hovering = $0 }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .updating($dragging) { _, dragging, _ in dragging = true }
                 .onChanged { value in
-                    dragging = true
                     onChanged(axis == .horizontal ? value.translation.width : value.translation.height)
                 }
-                .onEnded { _ in
-                    dragging = false
-                    onEnded()
-                }
         )
+        .onChange(of: dragging) { if !dragging { onEnded() } }
         .onTapGesture(count: 2, perform: onDoubleClick)
         .help("Drag to resize, double-click to even out")
     }
