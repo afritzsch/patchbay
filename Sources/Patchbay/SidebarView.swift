@@ -82,8 +82,8 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            loadFileURLs(from: providers) { store.open(droppedURLs: $0) }
+        .dropDestination(for: URL.self) { urls, _ in
+            store.open(droppedURLs: urls)
             return true
         }
         .safeAreaInset(edge: .bottom) {

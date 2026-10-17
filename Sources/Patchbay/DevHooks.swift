@@ -38,7 +38,7 @@ extension AppDelegate {
             let parts = arg.split(separator: " ")
             guard parts.count == 3, let from = Int(parts[0]).map({ $0 - 1 }), let to = Int(parts[1]).map({ $0 - 1 }),
                   store.sessions.indices.contains(from), store.sessions.indices.contains(to),
-                  let zone = ["left": DropZone.left, "right": .right, "top": .top, "bottom": .bottom, "center": .center][String(parts[2])]
+                  let zone = DropZone(rawValue: String(parts[2]))
             else { return print("dev: bad drop \(arg)") }
             store.drop(session: store.sessions[from].id, on: store.sessions[to].id, zone: zone)
         case "layout":

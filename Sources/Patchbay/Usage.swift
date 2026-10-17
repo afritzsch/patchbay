@@ -16,7 +16,6 @@ final class UsageMonitor {
     private(set) var updatedAt: Date?
 
     static let file = ShellIntegration.supportDir.appendingPathComponent("usage.json")
-    @ObservationIgnored private var lastModified: Date?
 
     init() {
         reload()
@@ -24,10 +23,9 @@ final class UsageMonitor {
 
     func reload() {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: Self.file.path),
-              let modified = attributes[.modificationDate] as? Date, modified != lastModified,
+              let modified = attributes[.modificationDate] as? Date, modified != updatedAt,
               let data = try? Data(contentsOf: Self.file),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        lastModified = modified
         updatedAt = modified
         fiveHour = Self.window(json["five_hour"])
         sevenDay = Self.window(json["seven_day"])
@@ -50,8 +48,8 @@ struct UsageBars: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 7) {
                 if usage.fiveHour != nil || usage.sevenDay != nil {
-                    UsageBar(title: "5-hour", window: usage.fiveHour, now: context.date, weekly: false)
-                    UsageBar(title: "Weekly", window: usage.sevenDay, now: context.date, weekly: true)
+                    UsageBar(title: "5-hour", window: usage.fiveHour, now: context.date)
+                    UsageBar(title: "Weekly", window: usage.sevenDay, now: context.date)
                     if let updated = usage.updatedAt {
                         Text("Updated \(updated, format: .relative(presentation: .named))")
                             .font(.caption2)
@@ -68,7 +66,6 @@ private struct UsageBar: View {
     let title: String
     let window: UsageWindow?
     let now: Date
-    let weekly: Bool
 
     var body: some View {
         // Once the window has reset, the old number no longer applies.

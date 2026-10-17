@@ -82,6 +82,14 @@ struct SessionStateTests {
         #expect(state.runningSubagents == 0)
     }
 
+    @Test func quittingMidSubagentForgetsIt() {
+        var state = claudeReady()
+        _ = submit("research", to: &state)
+        _ = state.apply(.preToolUse, payload: #"{"tool_name":"Task"}"#, visible: true, now: start)
+        _ = state.apply(.shellPrompt, payload: "130\t/repo", visible: true, now: start + 5)
+        #expect(state.runningSubagents == 0)
+    }
+
     @Test func agentWithoutHooksFollowsItsOutput() {
         var state = SessionState(cwd: "/tmp")
         _ = state.apply(.shellExec, payload: "codex --full-auto", visible: true, now: start)

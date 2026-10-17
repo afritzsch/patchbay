@@ -4,8 +4,6 @@ import SwiftUI
 /// to resize them, and each card's screen preview scales with its card.
 struct OverviewView: View {
     @Environment(SessionStore.self) private var store
-    @State private var columnDragStart: [Double]?
-    @State private var rowDragStart: [Double]?
 
     private let gutter: CGFloat = 12
     private let padding: CGFloat = 12
@@ -43,43 +41,29 @@ struct OverviewView: View {
                             let index = row * columns + column
                             Group {
                                 if index < count {
-                                    card(for: sessions[index])
+                                    OverviewCard(session: sessions[index], isFocused: store.selectedID == sessions[index].id)
                                 } else {
                                     Color.clear
                                 }
                             }
                             .frame(width: CGFloat(columnFractions[column]) * width, height: rowHeights[row])
                             if column < columns - 1 {
-                                ResizeHandle(axis: .horizontal, thickness: gutter) { translation in
-                                    let start = columnDragStart ?? columnFractions
-                                    if columnDragStart == nil { columnDragStart = start }
-                                    store.overviewColumnFractions = resized(
-                                        start, at: column, by: Double(translation / width),
-                                        minimum: Double(minimumColumnWidth / width))
-                                } onEnded: {
-                                    columnDragStart = nil
-                                    store.saveOverviewSizes()
+                                ResizeHandle(axis: .horizontal, thickness: gutter, fractions: columnFractions, index: column,
+                                             length: width, minimum: minimumColumnWidth) {
+                                    store.overviewColumnFractions = $0
                                 } onDoubleClick: {
                                     store.overviewColumnFractions = []
-                                    store.saveOverviewSizes()
                                 }
                                 .frame(height: rowHeights[row])
                             }
                         }
                     }
                     if row < rows - 1 {
-                        ResizeHandle(axis: .vertical, thickness: gutter) { translation in
-                            let start = rowDragStart ?? rowFractions
-                            if rowDragStart == nil { rowDragStart = start }
-                            store.overviewRowFractions = resized(
-                                start, at: row, by: Double(translation / height),
-                                minimum: Double(minimumRowHeight / height))
-                        } onEnded: {
-                            rowDragStart = nil
-                            store.saveOverviewSizes()
+                        ResizeHandle(axis: .vertical, thickness: gutter, fractions: rowFractions, index: row,
+                                     length: height, minimum: minimumRowHeight) {
+                            store.overviewRowFractions = $0
                         } onDoubleClick: {
                             store.overviewRowFractions = []
-                            store.saveOverviewSizes()
                         }
                     }
                 }
@@ -87,10 +71,6 @@ struct OverviewView: View {
             .padding(padding)
         }
         .scrollDisabled(fits)
-    }
-
-    private func card(for session: TerminalSession) -> some View {
-        OverviewCard(session: session, isFocused: store.selectedID == session.id)
     }
 
     /// The column count whose cards come closest to a landscape window shape, without getting too small.
@@ -114,7 +94,7 @@ struct OverviewView: View {
 
     /// Saved fractions when they match the grid's current shape, otherwise equal shares.
     static func fractions(_ saved: [Double], count: Int) -> [Double] {
-        saved.count == count ? saved : Array(repeating: 1 / Double(count), count: count)
+        saved.count == count ? saved : PaneLayout.even(count)
     }
 }
 

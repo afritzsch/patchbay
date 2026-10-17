@@ -84,7 +84,7 @@ private struct AppCommands: Commands {
             Button(store.showOverview ? "Hide Overview" : "Show Overview") { store.showOverview.toggle() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             Button(store.showHistory ? "Hide History" : "Show History") {
-                if store.showHistory { store.mode = .panes } else { store.showHistory(for: nil) }
+                store.showHistory.toggle()
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
             Divider()
@@ -120,17 +120,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         super.init()
         Self.shared = self
     }
-    private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = self
-            SessionStore.requestNotificationPermission()
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
         startDevHooks()
         // ⌘W closes the session, not the window, while the main window is in front.
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "w",

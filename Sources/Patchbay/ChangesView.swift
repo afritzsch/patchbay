@@ -17,24 +17,8 @@ struct ChangesView: View {
             VStack(spacing: 0) {
                 commitBox(git)
                 List(selection: $store.selectedChange) {
-                    if !staged.isEmpty {
-                        Section {
-                            ForEach(staged) { row($0, staged: true, root: git.root) }
-                        } header: {
-                            header("Staged Changes", count: staged.count, icon: "minus", help: "Unstage All") {
-                                Git.unstage(["."], in: git.root)
-                            }
-                        }
-                    }
-                    if !unstaged.isEmpty {
-                        Section {
-                            ForEach(unstaged) { row($0, staged: false, root: git.root) }
-                        } header: {
-                            header("Changes", count: unstaged.count, icon: "plus", help: "Stage All") {
-                                Git.stage(["."], in: git.root)
-                            }
-                        }
-                    }
+                    if !staged.isEmpty { section(staged, staged: true, root: git.root) }
+                    if !unstaged.isEmpty { section(unstaged, staged: false, root: git.root) }
                 }
                 .listStyle(.sidebar)
                 .overlay {
@@ -94,22 +78,28 @@ struct ChangesView: View {
         .padding(10)
     }
 
-    private func header(_ title: String, count: Int, icon: String, help: String,
-                        action: @escaping @Sendable () -> String?) -> some View {
-        HStack {
-            Text(title)
-            Text("\(count)").monospacedDigit()
-            Spacer()
-            if store.selectedSession?.git != nil {
-                Button {
-                    Task { await apply(action) }
-                } label: {
-                    Image(systemName: icon)
-                }
-                .buttonStyle(.borderless)
-                .help(help)
+    private func section(_ list: [GitChange], staged: Bool, root: String) -> some View {
+        Section {
+            ForEach(list) { row($0, staged: staged, root: root) }
+        } header: {
+            HStack {
+                Text(staged ? "Staged Changes" : "Changes")
+                Text("\(list.count)").monospacedDigit()
+                Spacer()
+                stageButton(["."], staged: staged, root: root)
+                    .help(staged ? "Unstage All" : "Stage All")
             }
         }
+    }
+
+    /// Stages `paths`, or unstages them from the staged list.
+    private func stageButton(_ paths: [String], staged: Bool, root: String) -> some View {
+        Button {
+            Task { await apply { staged ? Git.unstage(paths, in: root) : Git.stage(paths, in: root) } }
+        } label: {
+            Image(systemName: staged ? "minus" : "plus")
+        }
+        .buttonStyle(.borderless)
     }
 
     private func row(_ change: GitChange, staged: Bool, root: String) -> some View {
@@ -137,15 +127,8 @@ struct ChangesView: View {
                 .buttonStyle(.borderless)
                 .help("Discard changes")
             }
-            Button {
-                Task {
-                    await apply { staged ? Git.unstage([change.path], in: root) : Git.stage([change.path], in: root) }
-                }
-            } label: {
-                Image(systemName: staged ? "minus" : "plus")
-            }
-            .buttonStyle(.borderless)
-            .help(staged ? "Unstage" : "Stage")
+            stageButton([change.path], staged: staged, root: root)
+                .help(staged ? "Unstage" : "Stage")
         }
         .tag(ChangeSelection(path: change.path, staged: staged, untracked: change.worktree == "?"))
         .help(change.path)

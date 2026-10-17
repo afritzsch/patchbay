@@ -13,14 +13,10 @@ extension NSPasteboard.PasteboardType {
 extension SessionStore {
     /// Drag item for a session; drop targets read `dragged`, the item marks the drag as ours.
     func dragItem(for session: TerminalSession) -> NSItemProvider {
-        dragItem(.session(session.id), name: session.displayName)
-    }
-
-    private func dragItem(_ payload: DragPayload, name: String) -> NSItemProvider {
-        dragged = payload
+        dragged = .session(session.id)
         let provider = NSItemProvider()
-        provider.suggestedName = name
-        let data = Data(name.utf8)
+        provider.suggestedName = session.displayName
+        let data = Data(session.displayName.utf8)
         provider.registerDataRepresentation(forTypeIdentifier: UTType.terminalSession.identifier,
                                             visibility: .ownProcess) { completion in
             completion(data, nil)
@@ -28,30 +24,6 @@ extension SessionStore {
         }
         return provider
     }
-}
-
-/// Loads file URLs from drag item providers, then calls back on the main actor.
-@MainActor
-func loadFileURLs(from providers: [NSItemProvider], then handler: @escaping @MainActor ([URL]) -> Void) {
-    let group = DispatchGroup()
-    let collected = URLCollector()
-    for provider in providers where provider.canLoadObject(ofClass: URL.self) {
-        group.enter()
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            if let url { collected.append(url) }
-            group.leave()
-        }
-    }
-    group.notify(queue: .main) {
-        MainActor.assumeIsolated { handler(collected.urls) }
-    }
-}
-
-private final class URLCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [URL] = []
-    var urls: [URL] { lock.withLock { storage } }
-    func append(_ url: URL) { lock.withLock { storage.append(url) } }
 }
 
 extension PaneLayout {
@@ -65,27 +37,19 @@ extension PaneLayout {
 
 /// Renders a layout tree: a pane or a split of further nodes.
 struct LayoutNodeView: View {
+    @Environment(SessionStore.self) private var store
     let node: PaneLayout
 
     var body: some View {
         switch node {
         case .pane(let id):
-            PaneSlot(sessionID: id)
+            if let session = store.sessions.first(where: { $0.id == id }) {
+                PaneView(session: session)
+            } else {
+                Color(nsColor: Theme.terminalBackground)
+            }
         case .split(let id, let axis, let children, let fractions):
             SplitNodeView(id: id, axis: axis, children: children, fractions: fractions)
-        }
-    }
-}
-
-private struct PaneSlot: View {
-    @Environment(SessionStore.self) private var store
-    let sessionID: UUID
-
-    var body: some View {
-        if let session = store.sessions.first(where: { $0.id == sessionID }) {
-            PaneView(session: session)
-        } else {
-            Color(nsColor: Theme.terminalBackground)
         }
     }
 }
@@ -97,7 +61,6 @@ private struct SplitNodeView: View {
     let axis: SplitAxis
     let children: [PaneLayout]
     let fractions: [Double]
-    @State private var dragStart: [Double]?
 
     static let dividerThickness: CGFloat = 5
     static let minimumPaneLength: CGFloat = 120
@@ -122,16 +85,13 @@ private struct SplitNodeView: View {
 
     private func divider(after index: Int, available: CGFloat) -> some View {
         ResizeHandle(axis: axis, thickness: Self.dividerThickness, background: Color(nsColor: Theme.terminalBackground),
-                     idleOpacity: 0.10) { translation in
-            let start = dragStart ?? fractions
-            if dragStart == nil { dragStart = start }
-            let minimum = Double(Self.minimumPaneLength / available)
-            store.setFractions(resized(start, at: index, by: Double(translation / available), minimum: minimum), forSplit: id)
+                     idleOpacity: 0.10, fractions: fractions, index: index, length: available,
+                     minimum: Self.minimumPaneLength) {
+            store.setFractions($0, forSplit: id)
         } onEnded: {
-            dragStart = nil
             store.save()
         } onDoubleClick: {
-            store.setFractions(Array(repeating: 1 / Double(children.count), count: children.count), forSplit: id)
+            store.setFractions(PaneLayout.even(children.count), forSplit: id)
             store.save()
         }
     }
@@ -151,18 +111,24 @@ func resized(_ fractions: [Double], at index: Int, by delta: Double, minimum: Do
 }
 
 /// A draggable gap between panes or overview cards. `axis` is the axis of the stack it sits in, so a
-/// horizontal stack gets a vertical line that resizes columns.
+/// horizontal stack gets a vertical line that resizes columns. It moves the boundary after `fractions[index]`,
+/// shares of `length` points, keeping both sides at least `minimum` points.
 struct ResizeHandle: View {
     let axis: SplitAxis
     let thickness: CGFloat
     var background: Color = .clear
     var idleOpacity: Double = 0
-    let onChanged: (CGFloat) -> Void
+    let fractions: [Double]
+    let index: Int
+    let length: CGFloat
+    let minimum: CGFloat
+    let onChanged: ([Double]) -> Void
     /// Also called when the drag is cancelled, which DragGesture's own onEnded misses.
-    let onEnded: () -> Void
+    var onEnded: () -> Void = {}
     let onDoubleClick: () -> Void
     @GestureState private var dragging = false
     @State private var hovering = false
+    @State private var start: [Double]?
 
     var body: some View {
         ZStack {
@@ -180,10 +146,18 @@ struct ResizeHandle: View {
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .updating($dragging) { _, dragging, _ in dragging = true }
                 .onChanged { value in
-                    onChanged(axis == .horizontal ? value.translation.width : value.translation.height)
+                    let translation = axis == .horizontal ? value.translation.width : value.translation.height
+                    let from = start ?? fractions
+                    start = from
+                    onChanged(resized(from, at: index, by: Double(translation / length), minimum: Double(minimum / length)))
                 }
         )
-        .onChange(of: dragging) { if !dragging { onEnded() } }
+        .onChange(of: dragging) {
+            if !dragging {
+                start = nil
+                onEnded()
+            }
+        }
         .onTapGesture(count: 2, perform: onDoubleClick)
         .help("Drag to resize, double-click to even out")
     }
@@ -280,8 +254,7 @@ struct TerminalContainer: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TerminalHostView, context: Context) {
-        let id = session.id
-        view.sessionID = id
+        view.sessionID = session.id
         view.store = store
         view.dim.isHidden = !isDimmed
         view.splitsOnDrop = splitsOnDrop

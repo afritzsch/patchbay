@@ -1,6 +1,6 @@
 import Foundation
 
-enum HistoryKind: String, Codable, CaseIterable {
+enum HistoryKind: String, Codable {
     case sessionOpened, sessionClosed, movedIn
     case prompt, claudeFinished, claudeNeedsInput
     case command

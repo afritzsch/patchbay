@@ -54,7 +54,10 @@ final class SessionStore {
     }
     var showHistory: Bool {
         get { mode == .history }
-        set { mode = newValue ? .history : .panes }
+        set {
+            historySessionFilter = nil
+            mode = newValue ? .history : .panes
+        }
     }
     let history = HistoryStore()
     let usage = UsageMonitor()
@@ -67,12 +70,11 @@ final class SessionStore {
         didSet { UserDefaults.standard.set(overviewColumns, forKey: Preferences.Keys.overviewColumns) }
     }
     /// Relative column widths and row heights in the overview, as dragged by the user.
-    var overviewColumnFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewColumnFractions) as? [Double] ?? []
-    var overviewRowFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewRowFractions) as? [Double] ?? []
-
-    func saveOverviewSizes() {
-        UserDefaults.standard.set(overviewColumnFractions, forKey: Preferences.Keys.overviewColumnFractions)
-        UserDefaults.standard.set(overviewRowFractions, forKey: Preferences.Keys.overviewRowFractions)
+    var overviewColumnFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewColumnFractions) as? [Double] ?? [] {
+        didSet { UserDefaults.standard.set(overviewColumnFractions, forKey: Preferences.Keys.overviewColumnFractions) }
+    }
+    var overviewRowFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewRowFractions) as? [Double] ?? [] {
+        didSet { UserDefaults.standard.set(overviewRowFractions, forKey: Preferences.Keys.overviewRowFractions) }
     }
     var showNewSessionSheet = false
     /// The folder the new-session sheet starts with, instead of the focused session's.
@@ -94,8 +96,6 @@ final class SessionStore {
 
     private(set) var recentDirectories: [String] = UserDefaults.standard.stringArray(forKey: Preferences.Keys.recentDirectories) ?? []
 
-    @ObservationIgnored private var timers: [Timer] = []
-
     var selectedSession: TerminalSession? {
         sessions.first { $0.id == selectedID }
     }
@@ -110,22 +110,22 @@ final class SessionStore {
         } catch {
             NSLog("Patchbay: shell integration not installed: \(error)")
         }
-        timers.append(Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
-        })
-        timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        }
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
-        })
-        timers.append(Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+        }
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.scanExternalSessions()
                 self?.usage.reload()
             }
-        })
+        }
         // Sessions mark their git state stale when a command or tool finishes; this catches changes made elsewhere.
-        timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshGit(all: true) }
-        })
+        }
         if UserDefaults.standard.bool(forKey: Preferences.Keys.restoreSessions) { restore() }
     }
 
@@ -214,20 +214,14 @@ final class SessionStore {
 
     func close(_ session: TerminalSession) {
         guard let index = sessions.firstIndex(where: { $0.id == session.id }) else { return }
-        let paneOrder = layout?.sessionIDs ?? []
         record(.sessionClosed, session, text: session.agent.map { "Closed (\($0.name) was running)" } ?? "Closed")
         session.close()
         sessions.remove(at: index)
         tidyGroups()
         if multiSelection.remove(session.id) != nil, multiSelection.count < 2 { multiSelection = [] }
-        layout = layout?.removing(session.id)
-        if selectedID == session.id {
-            // Focus a neighbouring pane; with no panes left, show the next session in the sidebar.
-            if let paneIndex = paneOrder.firstIndex(of: session.id), let remaining = layout?.sessionIDs, !remaining.isEmpty {
-                selectedID = remaining[min(paneIndex, remaining.count - 1)]
-            } else {
-                selectedID = sessions.isEmpty ? nil : sessions[min(index, sessions.count - 1)].id
-            }
+        removePane(session.id)
+        if selectedID == session.id { // No panes left: show the next session in the sidebar.
+            selectedID = sessions.isEmpty ? nil : sessions[min(index, sessions.count - 1)].id
         }
         save()
     }
@@ -337,12 +331,17 @@ final class SessionStore {
     /// Removes a pane from the screen; its session keeps running in the sidebar.
     func closePane(_ id: UUID) {
         guard let layout, layout.sessionIDs.count > 1 else { return }
-        let order = layout.sessionIDs
-        self.layout = layout.removing(id)
-        if selectedID == id, let remaining = self.layout?.sessionIDs, let index = order.firstIndex(of: id) {
+        removePane(id)
+        save()
+    }
+
+    /// Takes `id`'s pane out of the layout; when it was focused, the neighbouring pane gets the focus.
+    private func removePane(_ id: UUID) {
+        let order = layout?.sessionIDs ?? []
+        layout = layout?.removing(id)
+        if selectedID == id, let index = order.firstIndex(of: id), let remaining = layout?.sessionIDs {
             selectedID = remaining[min(index, remaining.count - 1)]
         }
-        save()
     }
 
     func setFractions(_ fractions: [Double], forSplit id: UUID) {
@@ -455,7 +454,7 @@ final class SessionStore {
 
     private func poll() {
         for session in sessions { session.pollEvents() }
-        if sessions.contains(where: \.gitStale) { refreshGit() }
+        refreshGit()
         updateDockBadge()
     }
 
@@ -469,22 +468,14 @@ final class SessionStore {
         save() // Directories and Claude session IDs change as the sessions run; unchanged state isn't written.
     }
 
-    private var lastBadge = -1
     private func updateDockBadge() {
-        let count = attentionCount
-        guard count != lastBadge else { return }
-        lastBadge = count
-        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        let label = attentionCount > 0 ? "\(attentionCount)" : nil
+        if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
     }
 
     // MARK: - Notifications
 
     private static var notificationsAvailable: Bool { Bundle.main.bundleIdentifier != nil }
-
-    static func requestNotificationPermission() {
-        guard notificationsAvailable else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
 
     private func notify(_ session: TerminalSession, _ text: String) {
         guard Self.notificationsAvailable, UserDefaults.standard.bool(forKey: Preferences.Keys.notify), !session.isVisible()

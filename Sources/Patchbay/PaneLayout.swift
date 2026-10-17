@@ -8,7 +8,7 @@ enum SplitAxis: String, Codable {
 }
 
 /// Where something was dropped on a pane.
-enum DropZone: Equatable {
+enum DropZone: String {
     case left, right, top, bottom, center
 
     var axis: SplitAxis? {
@@ -43,8 +43,7 @@ enum PaneLayout: Codable, Equatable {
         let columns = Int(Double(ids.count).squareRoot().rounded(.up))
         let rows = stride(from: 0, to: ids.count, by: columns).map { ids[$0..<min($0 + columns, ids.count)] }
         func even(_ axis: SplitAxis, _ children: [PaneLayout]) -> PaneLayout {
-            children.count == 1 ? children[0] : .split(id: UUID(), axis: axis, children: children,
-                                                       fractions: Array(repeating: 1 / Double(children.count), count: children.count))
+            children.count == 1 ? children[0] : .split(id: UUID(), axis: axis, children: children, fractions: Self.even(children.count))
         }
         return even(.vertical, rows.map { even(.horizontal, $0.map(PaneLayout.pane)) })
     }
@@ -111,24 +110,16 @@ enum PaneLayout: Codable, Equatable {
     }
 
     func settingFractions(_ new: [Double], forSplit id: UUID) -> PaneLayout {
-        switch self {
-        case .pane:
-            return self
-        case .split(let splitID, let axis, let children, let fractions):
-            if splitID == id { return .split(id: splitID, axis: axis, children: children, fractions: new) }
-            return .split(id: splitID, axis: axis,
-                          children: children.map { $0.settingFractions(new, forSplit: id) }, fractions: fractions)
-        }
+        mapFractions { $0 == id ? new : $1 }
     }
 
     func equalized() -> PaneLayout {
-        switch self {
-        case .pane:
-            return self
-        case .split(let id, let axis, let children, _):
-            return .split(id: id, axis: axis, children: children.map { $0.equalized() },
-                          fractions: Array(repeating: 1 / Double(children.count), count: children.count))
-        }
+        mapFractions { Self.even($1.count) }
+    }
+
+    /// `count` equal shares.
+    static func even(_ count: Int) -> [Double] {
+        Array(repeating: 1 / Double(count), count: count)
     }
 
     /// Drops panes whose sessions no longer exist, e.g. in a layout restored from disk.
@@ -143,6 +134,12 @@ enum PaneLayout: Codable, Equatable {
         case .split(let id, let axis, let children, let fractions):
             return .split(id: id, axis: axis, children: children.map { $0.mapLeaves(transform) }, fractions: fractions)
         }
+    }
+
+    /// Each split's fractions replaced by `transform(splitID, fractions)`.
+    private func mapFractions(_ transform: (UUID, [Double]) -> [Double]) -> PaneLayout {
+        guard case .split(let id, let axis, let children, let fractions) = self else { return self }
+        return .split(id: id, axis: axis, children: children.map { $0.mapFractions(transform) }, fractions: transform(id, fractions))
     }
 
     private static func normalized(_ fractions: [Double]) -> [Double] {

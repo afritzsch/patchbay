@@ -47,7 +47,7 @@ struct ContentView: View {
         )) {
             TextField("Name", text: $renameText)
             Button("Rename") {
-                if let session = store.sessions.first(where: { $0.id == store.renamingID }) {
+                if let session = renamingSession {
                     store.rename(session, to: renameText)
                 } else if let group = renamingGroup {
                     store.renameGroup(group.id, to: renameText)
@@ -58,12 +58,13 @@ struct ContentView: View {
             if renamingGroup == nil { Text("Leave empty to name it after its folder.") }
         }
         .onChange(of: store.renamingID) {
-            renameText = renamingGroup?.name ?? store.sessions.first { $0.id == store.renamingID }?.customName ?? ""
+            renameText = renamingGroup?.name ?? renamingSession?.customName ?? ""
         }
         .background(WindowAccessor())
     }
 
     private var renamingGroup: SessionGroup? { store.groups.first { $0.id == store.renamingID } }
+    private var renamingSession: TerminalSession? { store.sessions.first { $0.id == store.renamingID } }
 
     private var title: String {
         switch store.mode {
@@ -100,7 +101,6 @@ struct ContentView: View {
                     Button("Even Out Sizes") {
                         store.overviewColumnFractions = []
                         store.overviewRowFractions = []
-                        store.saveOverviewSizes()
                     }
                 } label: {
                     Label("Columns", systemImage: "rectangle.split.3x3")
@@ -114,7 +114,7 @@ struct ContentView: View {
             }
             .help("Toggle the overview of all sessions (⇧⌘O)")
             Button {
-                if store.showHistory { store.mode = .panes } else { store.showHistory(for: nil) }
+                store.showHistory.toggle()
             } label: {
                 Label("History", systemImage: "clock.arrow.circlepath")
             }
@@ -150,8 +150,8 @@ struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(.rect)
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            loadFileURLs(from: providers) { store.open(droppedURLs: $0) }
+        .dropDestination(for: URL.self) { urls, _ in
+            store.open(droppedURLs: urls)
             return true
         }
     }
