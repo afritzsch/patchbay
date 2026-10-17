@@ -11,16 +11,47 @@ struct Agent: Identifiable, Codable, Hashable {
         case unsupported
     }
 
+    /// How the agent asks before running a tool, and the keys that answer it, typed into its terminal.
+    struct Approval: Codable, Hashable {
+        /// Text on screen while it asks (case-insensitive), as unlike its normal output as possible.
+        var prompt: String
+        /// Keys as typed; `esc` and `enter` stand for those keys.
+        var allow: String
+        var deny: String
+
+        /// Whether the screen's text shows the prompt, also when narrow panes wrap it inside a box.
+        func isShown(on screen: String) -> Bool {
+            !prompt.isEmpty && Self.words(screen).localizedCaseInsensitiveContains(Self.words(prompt))
+        }
+
+        private static func words(_ text: String) -> String {
+            text.split { $0.isWhitespace || ("\u{2500}"..."\u{257F}").contains($0) }.joined(separator: " ")
+        }
+
+        static func keys(_ text: String) -> String {
+            switch text.lowercased() {
+            case "esc": "\u{1b}"
+            case "enter": "\r"
+            default: text
+            }
+        }
+    }
+
     var id: String
     var name: String
     var command: String
     var promptStyle: PromptStyle = .unsupported
+    var approval: Approval?
 
-    static let claude = Agent(id: "claude", name: "Claude Code", command: "claude", promptStyle: .argument)
+    static let claude = Agent(id: "claude", name: "Claude Code", command: "claude", promptStyle: .argument,
+                              approval: ClaudeCode.approval)
+    // Codex's and Gemini's prompts are taken from their documentation, not yet tried in Patchbay.
     static let builtIn = [
         claude,
-        Agent(id: "codex", name: "Codex", command: "codex", promptStyle: .argument),
-        Agent(id: "gemini", name: "Gemini", command: "gemini", promptStyle: .interactiveFlag),
+        Agent(id: "codex", name: "Codex", command: "codex", promptStyle: .argument,
+              approval: Approval(prompt: "tell Codex what to do differently", allow: "y", deny: "esc")),
+        Agent(id: "gemini", name: "Gemini", command: "gemini", promptStyle: .interactiveFlag,
+              approval: Approval(prompt: "Allow once", allow: "1", deny: "esc")),
     ]
 
     /// Agents added in Settings, stored as JSON in UserDefaults.

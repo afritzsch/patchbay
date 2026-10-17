@@ -188,6 +188,7 @@ private struct OverviewCard: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            ApprovalButtons(session: session)
         }
         .contentShape(.rect)
         .onTapGesture(count: 2) { store.show(session.id) }

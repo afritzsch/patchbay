@@ -65,6 +65,12 @@ private struct AppCommands: Commands {
             Button("Previous Session") { store.selectAdjacent(-1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
+            // Not disabled while nothing is asked: SwiftUI updates the menu late, which would swallow the first ⌘Y.
+            Button("Allow Request") { store.selectedSession?.answerApproval(allow: true) }
+                .keyboardShortcut("y")
+            Button("Deny Request") { store.selectedSession?.answerApproval(allow: false) }
+                .keyboardShortcut("y", modifiers: [.command, .shift])
+            Divider()
             Button("Rename…") { store.renamingID = store.selectedID }
                 .keyboardShortcut("r")
                 .disabled(store.selectedSession == nil)

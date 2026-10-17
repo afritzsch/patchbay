@@ -462,6 +462,7 @@ final class SessionStore {
     private func tick() {
         for session in sessions {
             session.checkForSilence()
+            session.checkForApprovalPrompt()
             if session.unseen, session.isVisible() { session.markSeen() }
         }
         if watchingChanges { selectedSession?.gitStale = true }

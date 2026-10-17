@@ -10,6 +10,7 @@ extension SessionState {
         case .agentReady: "Waiting for prompt"
         case .agentWorking where runningSubagents > 0: "Waiting for agent"
         case .agentWorking: currentTool.map { "Working · \($0)" } ?? "Working"
+        case .agentNeedsInput where asksApproval: "Asks permission"
         case .agentNeedsInput: "Needs your input"
         case .agentDone: "Done"
         case .exited(let code): code.map { "Exited (\($0))" } ?? "Exited"
@@ -46,7 +47,9 @@ extension TerminalSession {
     /// The most useful one-line detail: what's running, what Claude asked, or what it was asked.
     var detailLine: String? {
         if case .running(let command) = state.status { return command }
-        if state.status == .agentNeedsInput, let message = state.message { return message }
+        if state.status == .agentNeedsInput, let message = (state.asksApproval ? state.approvalRequest : nil) ?? state.message {
+            return message
+        }
         if let message = state.message, state.unseen { return message }
         if state.agent != nil {
             if let lastPrompt = state.lastPrompt { return lastPrompt }
@@ -76,6 +79,24 @@ struct StatusIcon: View {
             .foregroundStyle(session.statusColor)
             .symbolEffect(.pulse, options: .repeating, isActive: session.status == .agentWorking || session.status == .agentNeedsInput)
             .frame(width: 18)
+    }
+}
+
+/// Allow and Deny for an agent's permission prompt. They type the agent's own answer keys into its terminal,
+/// which stays the place to answer in other ways.
+struct ApprovalButtons: View {
+    let session: TerminalSession
+
+    var body: some View {
+        if session.asksApproval, session.agent?.approval != nil {
+            HStack(spacing: 6) {
+                Button("Allow") { session.answerApproval(allow: true) }
+                    .help("Allow (⌘Y on the selected session)")
+                Button("Deny") { session.answerApproval(allow: false) }
+                    .help("Deny (⇧⌘Y on the selected session)")
+            }
+            .controlSize(.small)
+        }
     }
 }
 

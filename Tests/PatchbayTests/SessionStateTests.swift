@@ -128,3 +128,67 @@ struct SessionStateTests {
         #expect(payload["missing"] == nil)
     }
 }
+
+/// Permission prompts: reported by Claude's hook or seen on screen, answered from the app or the terminal.
+struct ApprovalTests {
+    let start = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test func claudeRequestFromHook() {
+        var state = SessionStateTests().claudeReady()
+        _ = SessionStateTests().submit("build", to: &state)
+        let request = #"{"cwd":"/repo","tool_name":"Edit","tool_input":{"file_path":"/repo/Sources/a.swift","old_string":"x"#
+        #expect(state.apply(.permissionRequest, payload: request, visible: true, now: start) == [])
+        #expect(state.asksApproval)
+        #expect(state.status == .agentNeedsInput)
+        #expect(state.approvalRequest == "Edit: Sources/a.swift")
+        #expect(state.statusLabel == "Asks permission")
+
+        let effects = state.apply(.notification, payload: #"{"message":"Claude needs your permission"}"#, visible: true, now: start)
+        #expect(effects == [.record(.claudeNeedsInput, "Allow Edit: Sources/a.swift?"), .alert("Allow Edit: Sources/a.swift?")])
+
+        _ = state.apply(.postToolUse, payload: #"{"tool_name":"Edit"}"#, visible: true, now: start + 2)
+        #expect(!state.asksApproval)
+        #expect(state.status == .agentWorking)
+    }
+
+    @Test func agentWithoutHooksSeenAsking() {
+        var state = SessionState(cwd: "/repo")
+        _ = state.apply(.shellExec, payload: "codex", visible: true, now: start)
+        #expect(state.status == .agentWorking)
+
+        #expect(state.approvalPrompt(shown: true, now: start + 2) == [.alert("Codex asks for permission")])
+        #expect(state.status == .agentNeedsInput)
+        #expect(state.needsAttention)
+
+        // Answered in the terminal: the prompt is gone after the next redraw.
+        _ = state.approvalPrompt(shown: false, now: start + 4)
+        #expect(!state.asksApproval)
+        #expect(state.status == .agentWorking)
+    }
+
+    @Test func answeringClearsTheRequest() {
+        var state = SessionState(cwd: "/repo")
+        _ = state.apply(.shellExec, payload: "gemini", visible: true, now: start)
+        _ = state.approvalPrompt(shown: true, now: start + 1)
+        state.inputSent(now: start + 2)
+        #expect(!state.asksApproval)
+        #expect(state.status == .agentWorking)
+    }
+
+    @Test func promptOnScreen() {
+        let codex = Agent.named("codex")!.approval!
+        #expect(codex.isShown(on: "│ ❯ 1. Yes, proceed\n│   3. No, and tell Codex what to do differently (esc) │"))
+        // Wrapped inside the box in a narrow pane.
+        #expect(codex.isShown(on: "│ 3. No, and tell Codex what   │\n│    to do differently (esc)     │"))
+        #expect(!codex.isShown(on: "Tell Codex what you want"))
+        #expect(!Agent.Approval(prompt: "", allow: "y", deny: "n").isShown(on: "anything"))
+        #expect(Agent.Approval.keys("Esc") == "\u{1b}")
+        #expect(Agent.Approval.keys("y") == "y")
+    }
+
+    @Test func requestSummary() {
+        #expect(ClaudeCode.requestSummary(HookPayload(#"{"tool_name":"Bash","tool_input":{"command":"npm test"}}"#)) == "Bash: npm test")
+        #expect(ClaudeCode.requestSummary(HookPayload(#"{"tool_name":"mcp__x__y","tool_input":{}}"#)) == "mcp__x__y")
+        #expect(ClaudeCode.requestSummary(HookPayload("{}")) == nil)
+    }
+}

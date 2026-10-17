@@ -35,6 +35,20 @@ enum ClaudeCode {
             || notification["message"]?.localizedCaseInsensitiveContains("waiting for your input") == true
     }
 
+    /// The permission prompt ("Do you want to proceed?") numbers its options from 1, "Yes"; Esc cancels. The hooks
+    /// report requests, so the screen isn't searched for the text.
+    static let approval = Agent.Approval(prompt: "Do you want to", allow: "1", deny: "esc")
+
+    /// "Bash: npm test", "Edit: Sources/Foo.swift" from a `PermissionRequest` payload. Looked up by key name
+    /// anywhere in the payload, since `tool_input` is nested and may be cut off.
+    static func requestSummary(_ json: HookPayload) -> String? {
+        guard let tool = json["tool_name"] else { return nil }
+        guard var detail = ["command", "file_path", "notebook_path", "url", "query", "pattern"].lazy.compactMap({ json[$0] }).first
+        else { return tool }
+        if let cwd = json["cwd"], detail.hasPrefix(cwd + "/") { detail.removeFirst(cwd.count + 1) }
+        return "\(tool): \(detail)"
+    }
+
     /// Claude's spinner redraws the screen while it works, so a working session silent for this long was
     /// interrupted (Esc and Ctrl-C fire no hook).
     static let interruptedAfterSilence: TimeInterval = 8

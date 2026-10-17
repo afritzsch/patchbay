@@ -48,6 +48,9 @@ with a sidebar that shows what each one is doing.
   command again. Kept in `~/Library/Application Support/Patchbay/history.jsonl`, 90 days by default (Settings).
 - **Attention**: sessions that need input or finished while you weren't looking get an orange dot, a dock badge
   and a notification; ⌘J jumps to the next one. Long shell commands (>10 s) finishing in the background count too.
+- **Permission requests**: an agent asking to run a tool shows *Asks permission* and, for Claude, the request
+  itself (*Bash: npm test*). Allow and Deny on the sidebar row or overview card, or ⌘Y / ⇧⌘Y for the selected
+  session, type the agent's own answer keys into its terminal, where you can still answer any other way.
 - **Restore**: on relaunch the pane layout, folders and Claude conversations come back. Both can be turned off
   in Settings (⌘,).
 
@@ -71,6 +74,7 @@ You can also open `Package.swift` in Xcode.
 | ⌘W | Close session (asks if an agent or a command is still running) |
 | ⌘1…⌘9, ⇧⌘] / ⇧⌘[ | Switch sessions |
 | ⌘J | Next session that needs you |
+| ⌘Y / ⇧⌘Y | Allow / deny the selected session's permission request |
 | ⌘D / ⇧⌘D | Split right / down (new shell in the same folder) |
 | ⌘] / ⌘[ | Next / previous pane |
 | ⌥⌘W | Remove pane (session keeps running) |
@@ -96,8 +100,9 @@ Esc/Ctrl-C in Claude fires no hook, so a "working" session whose screen is silen
 for a prompt again (unless a subagent is running: *Waiting for agent*).
 
 Other agents: Codex and Gemini are built in, and Settings → Other agents adds any command. They have no hooks, so
-they show *Working* while output flows and *Waiting for prompt* after 8 s of silence. Reopened sessions restart
-them fresh.
+they show *Working* while output flows and *Waiting for prompt* after 8 s of silence. When their output pauses,
+the screen is searched for the agent's permission prompt text (set per agent in Settings; Codex's and Gemini's
+defaults are untested). Reopened sessions restart them fresh.
 
 Limitations: the integration is zsh-only (other shells get a plain terminal). A `claude` alias keeps working:
 the wrapper runs the alias's command with the app's settings added.

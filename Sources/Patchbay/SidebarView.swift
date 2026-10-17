@@ -107,12 +107,18 @@ struct SidebarView: View {
 
     private func rows(in group: UUID?) -> some View {
         ForEach(Array(store.sessions.enumerated()).filter { $0.element.groupID == group }, id: \.element.id) { index, session in
-            SessionRow(session: session, index: index, onScreen: store.layout?.contains(session.id) == true)
+            // The buttons are outside the drag source, which takes the row's clicks.
+            VStack(alignment: .leading, spacing: 4) {
+                SessionRow(session: session, index: index, onScreen: store.layout?.contains(session.id) == true)
+                    .overlay {
+                        RowDragSource(payload: .session(session.id), name: session.displayName,
+                                      toolTip: index < 9 ? "⌘\(index + 1)" : nil) { click(session.id, $0) }
+                    }
+                ApprovalButtons(session: session)
+                    .padding(.leading, 26)
+                    .padding(.bottom, 3)
+            }
                 .tag(session.id)
-                .overlay {
-                    RowDragSource(payload: .session(session.id), name: session.displayName,
-                                  toolTip: index < 9 ? "⌘\(index + 1)" : nil) { click(session.id, $0) }
-                }
                 .contextMenu {
                     if store.multiSelection.contains(session.id) { SelectionMenu() } else { SessionMenu(session: session) }
                 }
