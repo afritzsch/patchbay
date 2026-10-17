@@ -26,7 +26,18 @@ struct PaneLayoutTests {
         let layout = PaneLayout.pane(a).inserting(b, at: a, zone: .right).inserting(c, at: b, zone: .right)
         #expect(layout.sessionIDs == [a, b, c])
         #expect(split(layout)?.children.count == 3)
-        #expect(split(layout)?.fractions == [0.5, 0.25, 0.25])
+        let fractions: [Double] = split(layout)?.fractions ?? []
+        #expect(fractions.count == 3 && fractions.allSatisfy { abs($0 - 1.0 / 3) < 1e-9 }) // the new pane gets an equal share
+    }
+
+    @Test func removingMergesARowLeftInsideARow() {
+        let d = UUID()
+        // a | (b over (c | d)); without b, c and d join a's row.
+        let layout = PaneLayout.pane(a).inserting(b, at: a, zone: .right).inserting(c, at: b, zone: .bottom)
+            .inserting(d, at: c, zone: .right)
+        let removed = layout.removing(b)
+        #expect(split(removed)?.children == [.pane(a), .pane(c), .pane(d)])
+        #expect(split(removed)?.fractions == [0.5, 0.25, 0.25])
     }
 
     @Test func splittingAcrossNests() {
@@ -49,7 +60,7 @@ struct PaneLayoutTests {
     @Test func fractionsStayWholeAfterRemoving() {
         let layout = PaneLayout.pane(a).inserting(b, at: a, zone: .right).inserting(c, at: b, zone: .right)
         let fractions = split(layout.removing(a))?.fractions ?? []
-        #expect(fractions == [0.5, 0.5])
+        #expect(fractions.count == 2 && fractions.allSatisfy { abs($0 - 0.5) < 1e-9 })
     }
 
     @Test func swappingReplacingKeeping() {

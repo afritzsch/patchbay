@@ -38,7 +38,8 @@ enum PaneLayout: Codable, Equatable {
 
     func contains(_ id: UUID) -> Bool { sessionIDs.contains(id) }
 
-    /// The tree without `id`'s pane; a split left with one child is replaced by that child.
+    /// The tree without `id`'s pane; a split left with one child is replaced by that child, and one left along
+    /// its parent's axis is merged into the parent, so a row never holds another row.
     func removing(_ id: UUID) -> PaneLayout? {
         switch self {
         case .pane(let leaf):
@@ -47,9 +48,15 @@ enum PaneLayout: Codable, Equatable {
             var kept: [PaneLayout] = []
             var keptFractions: [Double] = []
             for (child, fraction) in zip(children, fractions) {
-                if let child = child.removing(id) {
+                switch child.removing(id) {
+                case .split(_, axis, let grandchildren, let shares):
+                    kept += grandchildren
+                    keptFractions += shares.map { $0 * fraction }
+                case let child?:
                     kept.append(child)
                     keptFractions.append(fraction)
+                case nil:
+                    break
                 }
             }
             if kept.isEmpty { return nil }
@@ -69,7 +76,8 @@ enum PaneLayout: Codable, Equatable {
     }
 
     /// Splits `target`'s pane and puts `new` on the given side. Joins the parent split when it already
-    /// runs along the same axis, so three side-by-side panes share one row instead of nesting.
+    /// runs along the same axis, so three side-by-side panes share one row instead of nesting; the new pane
+    /// then gets an equal share and the others shrink in proportion.
     func inserting(_ new: UUID, at target: UUID, zone: DropZone) -> PaneLayout {
         guard let axis = zone.axis else { return replacing(target, with: new) }
         switch self {
@@ -79,11 +87,11 @@ enum PaneLayout: Codable, Equatable {
             return .split(id: UUID(), axis: axis, children: children, fractions: [0.5, 0.5])
         case .split(let splitID, let splitAxis, var children, var fractions):
             if splitAxis == axis, let index = children.firstIndex(of: .pane(target)) {
-                let half = fractions[index] / 2
-                fractions[index] = half
+                let share = 1 / Double(children.count + 1)
+                fractions = fractions.map { $0 * (1 - share) }
                 let at = zone.insertsBefore ? index : index + 1
                 children.insert(.pane(new), at: at)
-                fractions.insert(half, at: at)
+                fractions.insert(share, at: at)
                 return .split(id: splitID, axis: splitAxis, children: children, fractions: fractions)
             }
             return .split(id: splitID, axis: splitAxis,
