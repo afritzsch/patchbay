@@ -423,7 +423,7 @@ final class RowDragSourceView: NSView, NSDraggingSource {
         guard let store, let payload else { return }
         store.dragged = payload
         if case .session(let id) = payload, store.mode == .panes, store.layout?.contains(id) == true,
-           let pane = store.sessions.first(where: { $0.id == id })?.terminal.superview as? TerminalHostView {
+           let pane = store.session(id)?.terminal.superview as? TerminalHostView {
             pane.leaving.isHidden = false
             leavingPane = pane
         }

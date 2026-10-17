@@ -176,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let idString = response.notification.request.content.userInfo["session"] as? String
         await MainActor.run {
             NSApp.activate()
-            if let idString, let id = UUID(uuidString: idString), store.sessions.contains(where: { $0.id == id }) {
+            if let idString, let id = UUID(uuidString: idString), store.session(id) != nil {
                 store.show(id)
             }
             mainWindow?.makeKeyAndOrderFront(nil)

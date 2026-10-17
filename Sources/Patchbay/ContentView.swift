@@ -64,7 +64,7 @@ struct ContentView: View {
     }
 
     private var renamingGroup: SessionGroup? { store.groups.first { $0.id == store.renamingID } }
-    private var renamingSession: TerminalSession? { store.sessions.first { $0.id == store.renamingID } }
+    private var renamingSession: TerminalSession? { store.session(store.renamingID) }
 
     private var title: String {
         switch store.mode {

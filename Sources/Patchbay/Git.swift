@@ -29,6 +29,19 @@ struct GitRepo: Sendable {
     func worktreePath(for branch: String) -> String {
         "\(Git.worktreesFolder)/\((root as NSString).lastPathComponent)/\(branch)"
     }
+
+    /// Makes a worktree at `worktreePath(for: branch)` on a new `branch` starting at `base`, or on the existing
+    /// `branch` when `base` is nil, and copies the setup's files into it. Returns git's error, or nil on success.
+    /// Blocking: call off the main thread.
+    func addWorktree(branch: String, base: String?) -> String? {
+        let path = worktreePath(for: branch)
+        // Forgets worktrees whose folders were deleted by hand; their branches would count as checked out.
+        _ = Git.perform(["worktree", "prune"], in: root)
+        let arguments = ["worktree", "add"] + (base.map { ["-b", branch, path, $0] } ?? [path, branch])
+        if let error = Git.perform(arguments, in: root, timeout: 60) { return error }
+        setup?.copyFiles(from: root, to: path)
+        return nil
+    }
 }
 
 /// `.patchbay.json` in a repository: what a new worktree needs that git doesn't check out.
@@ -202,13 +215,6 @@ enum Git {
         perform(["commit", "-m", message], in: root, timeout: 60)
     }
 
-    /// A worktree at `path` on a new `branch` starting at `base`, or on the existing `branch` when `base` is nil.
-    static func addWorktree(in directory: String, branch: String, base: String?, at path: String) -> String? {
-        // Forgets worktrees whose folders were deleted by hand; their branches would count as checked out.
-        _ = perform(["worktree", "prune"], in: directory)
-        return perform(["worktree", "add"] + (base.map { ["-b", branch, path, $0] } ?? [path, branch]), in: directory, timeout: 60)
-    }
-
     /// Deletes a worktree with its uncommitted changes, then its branch unless that has unmerged commits.
     static func removeWorktree(_ path: String) -> String? {
         guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)
@@ -219,7 +225,7 @@ enum Git {
         return nil
     }
 
-    private static func perform(_ arguments: [String], in directory: String, timeout: TimeInterval = 10) -> String? {
+    fileprivate static func perform(_ arguments: [String], in directory: String, timeout: TimeInterval = 10) -> String? {
         guard let (status, output) = execute(arguments, in: directory, timeout: timeout, mergeErrors: true) else {
             return "Couldn't run git."
         }

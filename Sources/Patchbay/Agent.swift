@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A terminal coding agent. A session counts as running one while the command that starts it is in the foreground.
 struct Agent: Identifiable, Codable, Hashable {
@@ -56,17 +57,31 @@ struct Agent: Identifiable, Codable, Hashable {
 
     /// Agents added in Settings, stored as JSON in UserDefaults.
     static var custom: [Agent] {
-        get {
-            UserDefaults.standard.data(forKey: Preferences.Keys.customAgents)
-                .flatMap { try? JSONDecoder().decode([Agent].self, from: $0) } ?? []
+        get { savedCustom.withLock { $0 } }
+        set {
+            savedCustom.withLock { $0 = newValue }
+            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Preferences.Keys.customAgents)
         }
-        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Preferences.Keys.customAgents) }
     }
+
+    /// Decoded once: context menus and every shell event look agents up.
+    private static let savedCustom = Mutex(UserDefaults.standard.data(forKey: Preferences.Keys.customAgents)
+        .flatMap { try? JSONDecoder().decode([Agent].self, from: $0) } ?? [])
 
     static var all: [Agent] { builtIn + custom }
 
     /// Reports its status through Claude Code hooks. Other agents count as working while their output flows.
     var hasHooks: Bool { id == Agent.claude.id }
+
+    /// The shell command that starts it with `arguments` and, when it takes one, a first prompt.
+    func commandLine(arguments: [String] = [], prompt: String? = nil) -> String {
+        var parts = [command] + arguments.map(ShellIntegration.quote)
+        if let prompt, !prompt.isEmpty, promptStyle != .unsupported {
+            if promptStyle == .interactiveFlag { parts.append("-i") }
+            parts.append(ShellIntegration.quote(prompt))
+        }
+        return parts.joined(separator: " ")
+    }
 
     static func named(_ id: String) -> Agent? {
         all.first { $0.id == id }

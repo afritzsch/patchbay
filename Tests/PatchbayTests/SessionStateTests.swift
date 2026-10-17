@@ -33,13 +33,13 @@ struct SessionStateTests {
         let effects = state.apply(.stop, payload: "{}", visible: false, now: start + 30)
         #expect(state.status == .agentDone)
         #expect(state.unseen)
-        #expect(effects == [.record(.claudeFinished, "fix it", duration: 30), .gitChanged, .alert("Done: fix it")])
+        #expect(effects == [.record(.agentFinished, "fix it", duration: 30), .gitChanged, .alert("Done: fix it")])
     }
 
     @Test func finishingWhileLookingDoesNotNotify() {
         var state = claudeReady()
         _ = submit("hi", to: &state)
-        #expect(state.apply(.stop, payload: "{}", visible: true, now: start) == [.record(.claudeFinished, "hi", duration: 0), .gitChanged])
+        #expect(state.apply(.stop, payload: "{}", visible: true, now: start) == [.record(.agentFinished, "hi", duration: 0), .gitChanged])
         #expect(!state.unseen)
     }
 
@@ -48,7 +48,7 @@ struct SessionStateTests {
         _ = submit("deploy", to: &state)
         let question = "Claude needs your permission to use Bash"
         let effects = state.apply(.notification, payload: #"{"message":"\#(question)"}"#, visible: true, now: start)
-        #expect(effects == [.record(.claudeNeedsInput, question), .alert(question)])
+        #expect(effects == [.record(.agentNeedsInput, question), .alert(question)])
         #expect(state.status == .agentNeedsInput)
         #expect(state.needsAttention)
 
@@ -152,7 +152,7 @@ struct ApprovalTests {
         #expect(state.statusLabel == "Asks permission")
 
         let effects = state.apply(.notification, payload: #"{"message":"Claude needs your permission"}"#, visible: true, now: start)
-        #expect(effects == [.record(.claudeNeedsInput, "Allow Edit: Sources/a.swift?"), .alert("Allow Edit: Sources/a.swift?")])
+        #expect(effects == [.record(.agentNeedsInput, "Allow Edit: Sources/a.swift?"), .alert("Allow Edit: Sources/a.swift?")])
 
         _ = state.apply(.postToolUse, payload: #"{"tool_name":"Edit"}"#, visible: true, now: start + 2)
         #expect(!state.asksApproval)

@@ -43,7 +43,7 @@ struct LayoutNodeView: View {
     var body: some View {
         switch node {
         case .pane(let id):
-            if let session = store.sessions.first(where: { $0.id == id }) {
+            if let session = store.session(id) {
                 PaneView(session: session)
             } else {
                 Color(nsColor: Theme.terminalBackground)
@@ -450,7 +450,7 @@ final class TerminalHostView: NSView {
         guard let first = files.first else { return false }
         if zone == .center {
             let paths = files.map { Self.shellEscaped($0.path) }.joined(separator: " ")
-            store.sessions.first { $0.id == target }?.terminal.send(txt: paths + " ")
+            store.session(target)?.terminal.send(txt: paths + " ")
         } else {
             store.open(droppedURLs: [first], splitting: target, zone: zone)
         }

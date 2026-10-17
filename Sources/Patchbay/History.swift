@@ -2,14 +2,16 @@ import Foundation
 
 enum HistoryKind: String, Codable {
     case sessionOpened, sessionClosed, movedIn
-    case prompt, claudeFinished, claudeNeedsInput
+    case prompt
+    // Raw values from when only Claude reported these, as history.jsonl stores them.
+    case agentFinished = "claudeFinished", agentNeedsInput = "claudeNeedsInput"
     case command
 
     /// The filter group shown in the history view.
     var group: HistoryGroup {
         switch self {
         case .prompt: .prompts
-        case .claudeFinished, .claudeNeedsInput: .claude
+        case .agentFinished, .agentNeedsInput: .agents
         case .command: .commands
         case .sessionOpened, .sessionClosed, .movedIn: .sessions
         }
@@ -18,7 +20,7 @@ enum HistoryKind: String, Codable {
 
 enum HistoryGroup: String, CaseIterable, Identifiable {
     case prompts = "Prompts"
-    case claude = "Claude"
+    case agents = "Agents"
     case commands = "Commands"
     case sessions = "Sessions"
 
@@ -34,11 +36,13 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     let sessionID: UUID
     let sessionName: String
     let directory: String
-    /// The prompt, command, Claude's question, or a description.
+    /// The prompt, command, the agent's question, or a description.
     let text: String
+    /// The name of the agent running in the session; missing in entries from before it was recorded.
+    var agent: String?
     var claudeSessionID: String?
     var exitCode: Int?
-    /// Seconds a command or Claude's turn took.
+    /// Seconds a command or the agent's turn took.
     var duration: Double?
 }
 

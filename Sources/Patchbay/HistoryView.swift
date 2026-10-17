@@ -18,7 +18,7 @@ struct HistoryView: View {
                     Label(store.history.entries.isEmpty ? "No History Yet" : "Nothing Matches", systemImage: "clock")
                 } description: {
                     Text(store.history.entries.isEmpty
-                         ? "Prompts, Claude's answers and questions, commands and sessions show up here as you work."
+                         ? "Prompts, agents' answers and questions, commands and sessions show up here as you work."
                          : "Try another search, session or filter.")
                 }
                 .frame(maxHeight: .infinity)
@@ -27,7 +27,7 @@ struct HistoryView: View {
                     ForEach(Self.days(Array(entries.prefix(Self.shownLimit))), id: \.day) { day in
                         Section(Self.dayTitle(day.day)) {
                             ForEach(day.entries) { entry in
-                                HistoryRow(entry: entry, session: store.sessions.first { $0.id == entry.sessionID })
+                                HistoryRow(entry: entry, session: store.session(entry.sessionID))
                             }
                         }
                     }
@@ -153,7 +153,7 @@ private struct HistoryRow: View {
                 if !entry.text.isEmpty {
                     Text(entry.text)
                         .font(entry.kind == .command ? .system(.body, design: .monospaced) : .body)
-                        .foregroundStyle(entry.kind == .claudeFinished ? .secondary : .primary)
+                        .foregroundStyle(entry.kind == .agentFinished ? .secondary : .primary)
                         .lineLimit(entry.kind == .prompt ? 6 : 2)
                         .textSelection(.enabled)
                 }
@@ -174,8 +174,8 @@ private struct HistoryRow: View {
     private var label: String {
         switch entry.kind {
         case .prompt: return "Prompt"
-        case .claudeFinished: return "Claude finished" + (entry.duration.map { " · took \(Self.duration($0))" } ?? "")
-        case .claudeNeedsInput: return "Claude asked"
+        case .agentFinished: return "\(agentName) finished" + (entry.duration.map { " · took \(Self.duration($0))" } ?? "")
+        case .agentNeedsInput: return "\(agentName) asked"
         case .command:
             var text = failedCode.map { "Command failed (exit \($0))" } ?? "Command"
             if let duration = entry.duration, duration >= 1 { text += " · \(Self.duration(duration))" }
@@ -184,14 +184,17 @@ private struct HistoryRow: View {
         }
     }
 
+    /// Older entries don't name the agent; only Claude reported these then.
+    private var agentName: String { entry.agent ?? "Claude" }
+
     /// A command's exit code when it failed.
     private var failedCode: Int? { entry.exitCode.flatMap { $0 == 0 ? nil : $0 } }
 
     private var symbol: String {
         switch entry.kind {
         case .prompt: "text.bubble"
-        case .claudeFinished: "checkmark.circle.fill"
-        case .claudeNeedsInput: "exclamationmark.bubble.fill"
+        case .agentFinished: "checkmark.circle.fill"
+        case .agentNeedsInput: "exclamationmark.bubble.fill"
         case .command: failedCode == nil ? "chevron.right.square" : "xmark.square"
         case .sessionOpened: "plus.circle"
         case .sessionClosed: "minus.circle"
@@ -202,8 +205,8 @@ private struct HistoryRow: View {
     private var color: Color {
         switch entry.kind {
         case .prompt: .purple
-        case .claudeFinished: .green
-        case .claudeNeedsInput: .orange
+        case .agentFinished: .green
+        case .agentNeedsInput: .orange
         case .command: failedCode == nil ? .blue : .red
         case .sessionOpened, .sessionClosed, .movedIn: .secondary
         }
@@ -211,7 +214,7 @@ private struct HistoryRow: View {
 
     /// The Claude conversation can be resumed when nothing runs it, here or in another terminal.
     private var canResume: Bool {
-        guard let id = entry.claudeSessionID, [.prompt, .claudeFinished, .claudeNeedsInput].contains(entry.kind) else {
+        guard let id = entry.claudeSessionID, [.prompt, .agentFinished, .agentNeedsInput].contains(entry.kind) else {
             return false
         }
         return !store.isRunning(claudeConversation: id) && ClaudeTranscripts.exist(for: id)

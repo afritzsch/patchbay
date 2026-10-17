@@ -39,6 +39,13 @@ struct GitParserTests {
         #expect(repo.worktreePath(for: "patchbay/abc") == NSHomeDirectory() + "/.patchbay/worktrees/patchbay/patchbay/abc")
     }
 
+    @Test func agentCommandLine() {
+        #expect(Agent.claude.commandLine(arguments: ["--resume", "abc"], prompt: "it's done?")
+                == #"claude '--resume' 'abc' 'it'\''s done?'"#)
+        #expect(Agent.named("gemini")?.commandLine(prompt: "hi") == "gemini -i 'hi'")
+        #expect(Agent(id: "x", name: "X", command: "x").commandLine(prompt: "ignored") == "x")
+    }
+
     @Test func worktreeSetupCopiesExistingFiles() throws {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         defer { try? FileManager.default.removeItem(atPath: temp) }
@@ -102,6 +109,26 @@ struct SmallParserTests {
         #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 50), in: bounds) == .center)
         #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 95), in: bounds) == .top) // AppKit's y grows upwards
         #expect(TerminalHostView.zone(at: NSPoint(x: 50, y: 5), in: bounds) == .bottom)
+    }
+
+    @Test func eventFileStartsOver() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        func append(_ text: String) throws { // like the writers' `>>`
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(text.utf8))
+        }
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let reader = EventFileReader(url: url, limit: 10)
+        try append("Stop\t{}\nShellPrompt\t0")
+        let late = try FileHandle(forWritingTo: url) // a writer that opened the file just before it starts over
+        #expect(reader.readNewLines() == ["Stop\t{}"])
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int == 0)
+        try late.seekToEnd()
+        try late.write(contentsOf: Data("\t/tmp\n".utf8))
+        try append("ShellExec\tls\n")
+        #expect(reader.readNewLines() == ["ShellPrompt\t0\t/tmp", "ShellExec\tls"])
     }
 
     @Test func elapsedTime() {
