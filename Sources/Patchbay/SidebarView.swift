@@ -3,9 +3,34 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(SessionStore.self) private var store
     @State private var showAllExternal = false
+    @State private var tab = Tab.sessions
     private let externalLimit = 3
 
+    private enum Tab { case sessions, changes }
+
     var body: some View {
+        Group {
+            switch tab {
+            case .sessions: sessionList
+            case .changes: ChangesView()
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            Picker("", selection: $tab) {
+                Text("Sessions").tag(Tab.sessions)
+                Text(changeCount > 0 ? "Changes \(changeCount)" : "Changes").tag(Tab.changes)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private var changeCount: Int { store.selectedSession?.git?.changed ?? 0 }
+
+    @ViewBuilder
+    private var sessionList: some View {
         @Bindable var store = store
         List(selection: Binding(
             get: { store.mode == .panes ? store.selectedID : nil },
