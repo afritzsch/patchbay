@@ -35,6 +35,8 @@ final class TerminalSession: Identifiable {
     private(set) var currentTool: String?
     /// Something happened the user hasn't looked at yet (Claude finished, a long command ended, a bell).
     var unseen = false
+    /// The working tree's git state; nil outside a repository.
+    var git: GitInfo?
 
     @ObservationIgnored let terminal: SessionTerminalView
     @ObservationIgnored private(set) var lastOutput = Date()
@@ -44,6 +46,8 @@ final class TerminalSession: Identifiable {
     /// Called for everything worth keeping in the activity history.
     @ObservationIgnored var onRecord: ((TerminalSession, HistoryKind, String, _ exitCode: Int?, _ duration: Double?) -> Void)?
     @ObservationIgnored private var promptStarted: Date?
+    /// Git state may have changed (a command finished, Claude's turn ended); the store refreshes it soon.
+    @ObservationIgnored var gitStale = true
     /// True while the user is looking at this session.
     @ObservationIgnored var isVisible: () -> Bool = { false }
 
@@ -151,6 +155,7 @@ final class TerminalSession: Identifiable {
             }
             isClaude = false
             currentTool = nil
+            gitStale = true
             setStatus(.idle)
         case "SessionStart":
             let json = HookPayload(payload)
@@ -195,6 +200,7 @@ final class TerminalSession: Identifiable {
             isClaude = true
             currentTool = nil
             message = nil
+            gitStale = true
             setStatus(.claudeDone)
             onRecord?(self, .claudeFinished, lastPrompt ?? "", nil, promptStarted.map { Date().timeIntervalSince($0) })
             promptStarted = nil

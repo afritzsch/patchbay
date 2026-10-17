@@ -86,3 +86,19 @@ struct ElapsedText: View {
         return "\(s / 86400)d"
     }
 }
+
+/// "⎇ main ●3 ↑1 ↓2": branch, changed files, commits ahead of and behind the upstream. Font and colour come from the caller.
+struct GitBadge: View {
+    let git: GitInfo
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Label(git.branch, systemImage: "arrow.triangle.branch")
+                .lineLimit(1)
+            if git.changed > 0 { Text("●\(git.changed)").foregroundStyle(.orange) }
+            if git.ahead > 0 { Text("↑\(git.ahead)") }
+            if git.behind > 0 { Text("↓\(git.behind)") }
+        }
+        .fixedSize()
+    }
+}

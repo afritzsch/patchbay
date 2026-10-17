@@ -174,11 +174,14 @@ private struct OverviewCard: View {
                 .buttonStyle(.borderless)
                 .help("Open in the panes")
             }
-            Text(session.abbreviatedCwd)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
+            HStack(spacing: 8) {
+                Text(session.abbreviatedCwd)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                if let git = session.git { GitBadge(git: git) }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
             if let detail = session.detailLine {
                 Text(detail)
                     .font(.callout)

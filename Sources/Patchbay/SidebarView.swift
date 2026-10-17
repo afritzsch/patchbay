@@ -112,6 +112,12 @@ struct SidebarView: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(session.cwd, forType: .string)
         }
+        if let git = session.git {
+            Button("Copy Branch Name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(git.branch, forType: .string)
+            }
+        }
         Divider()
         Button("Close Session", role: .destructive) { store.confirmAndClose(session) }
     }
@@ -164,11 +170,16 @@ struct SessionRow: View {
                         .lineLimit(2)
                         .truncationMode(.tail)
                 }
-                Text(session.abbreviatedCwd)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                HStack(spacing: 6) {
+                    Text(session.abbreviatedCwd)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    if let git = session.git {
+                        GitBadge(git: git).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption2)
             }
         }
         .padding(.vertical, 3)

@@ -110,7 +110,10 @@ final class SessionStore {
             MainActor.assumeIsolated { self?.tick() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scanExternalSessions() }
+            MainActor.assumeIsolated {
+                self?.scanExternalSessions()
+                self?.refreshGit()
+            }
         })
         if UserDefaults.standard.bool(forKey: Keys.restoreSessions) { restore() }
     }
@@ -292,6 +295,27 @@ final class SessionStore {
         }
     }
 
+    // MARK: - Git
+
+    @ObservationIgnored private var gitRefreshInFlight = false
+
+    /// Reads the git state of every session's folder off the main thread; one `git` run per distinct folder.
+    private func refreshGit() {
+        guard !gitRefreshInFlight else { return }
+        gitRefreshInFlight = true
+        for session in sessions { session.gitStale = false }
+        let directories = Set(sessions.map(\.cwd))
+        Task {
+            let infos = await Task.detached {
+                directories.reduce(into: [String: GitInfo]()) { $0[$1] = Git.info(at: $1) }
+            }.value
+            for session in sessions where directories.contains(session.cwd) && session.git != infos[session.cwd] {
+                session.git = infos[session.cwd]
+            }
+            gitRefreshInFlight = false
+        }
+    }
+
     // MARK: - Panes
 
     /// Clicking into a pane's terminal focuses that session.
@@ -426,6 +450,7 @@ final class SessionStore {
 
     private func poll() {
         for session in sessions { session.pollEvents() }
+        if sessions.contains(where: \.gitStale) { refreshGit() }
         updateDockBadge()
     }
 

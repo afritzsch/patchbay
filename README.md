@@ -6,6 +6,9 @@ shows what each one is doing.
 - **Sidebar**: every session with its status (*Working · Bash*, *Needs your input*, *Done*, *Running `npm test`*,
   *Idle*), how long it's been in that state, the last prompt you gave Claude or the question it's asking, and
   its folder. Drag to reorder, right-click to rename / open a sibling shell / show in Finder.
+- **Git state**: in a git repository, the folder line also shows the branch, the number of changed files
+  (`●3`) and commits ahead of / behind the upstream (`↑1 ↓2`), in the sidebar, pane headers and overview cards.
+  It refreshes every few seconds and right after a command or Claude's turn finishes, without taking git's locks.
 - **Split panes**: drag a session from the sidebar (or a pane by its title bar) onto a pane. Drop it on an
   edge to split left/right/top/bottom, or in the centre to swap it in. Drag the dividers to resize (double-click
   one to even them out); terminals reflow to their new size as you drag and when the window is resized. Clicking a
