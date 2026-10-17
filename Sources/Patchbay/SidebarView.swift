@@ -143,18 +143,10 @@ struct SessionRow: View {
                 .font(.system(size: 13))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(session.displayName)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(session.rowTitle)
                         .fontWeight(session.needsAttention ? .semibold : .regular)
-                        .lineLimit(1)
-                    if let agent = session.agent {
-                        Text(agent.name)
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.purple.opacity(0.18), in: .rect(cornerRadius: 3))
-                            .foregroundStyle(.purple)
-                    }
+                        .lineLimit(2)
                     Spacer(minLength: 4)
                     if session.needsAttention {
                         Circle().fill(.orange).frame(width: 7, height: 7)
@@ -172,7 +164,7 @@ struct SessionRow: View {
                 Text(session.statusLabel)
                     .font(.caption)
                     .foregroundStyle(session.statusColor)
-                if let detail = session.detailLine {
+                if let detail = session.detailLine, detail != session.rowTitle {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -180,6 +172,14 @@ struct SessionRow: View {
                         .truncationMode(.tail)
                 }
                 HStack(spacing: 6) {
+                    if let agent = session.agent {
+                        Text(agent.name)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.purple.opacity(0.18), in: .rect(cornerRadius: 3))
+                            .foregroundStyle(.purple)
+                    }
                     Text(session.abbreviatedCwd)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
