@@ -147,6 +147,7 @@ struct SettingsView: View {
     @AppStorage(Preferences.Keys.restoreSessions) private var restoreSessions = true
     @AppStorage(Preferences.Keys.resumeClaude) private var resumeClaude = true
     @AppStorage(Preferences.Keys.notify) private var notify = true
+    @AppStorage(Preferences.Keys.agentTools) private var agentTools = true
     @Environment(SessionStore.self) private var store
     @State private var customAgents = Agent.custom
 
@@ -157,6 +158,7 @@ struct SettingsView: View {
             Toggle("Resume Claude conversations when reopening", isOn: $resumeClaude)
                 .disabled(!restoreSessions)
             Toggle("Notify when an agent needs input or finishes", isOn: $notify)
+            Toggle("Let Claude start and direct other sessions", isOn: $agentTools)
             Stepper("Font size: \(Int(store.fontSize)) pt", value: $store.fontSize, in: Preferences.fontSizes)
             Picker("Keep history for", selection: Bindable(store.history).retentionDays) {
                 Text("7 days").tag(7)

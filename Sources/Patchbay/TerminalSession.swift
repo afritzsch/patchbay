@@ -16,6 +16,8 @@ final class TerminalSession: Identifiable {
     var git: GitInfo?
     /// Comments on its diff, waiting to be sent to the agent.
     var reviewComments: [ReviewComment] = []
+    /// The session whose agent opened this one (`new_session`); only that agent may type into it or close it.
+    var startedBy: UUID?
 
     @ObservationIgnored let terminal: SessionTerminalView
     @ObservationIgnored private var lastOutput = Date()
@@ -128,13 +130,28 @@ final class TerminalSession: Identifiable {
 
     /// Types the review comments into the terminal as one paste, without pressing Return, and focuses it.
     func sendReviewComments() {
-        let message = ReviewComment.message(reviewComments)
-        // Without bracketed paste, each newline would press Return.
-        terminal.send(txt: terminal.getTerminal().bracketedPasteMode
-            ? "\u{1b}[200~\(message)\u{1b}[201~"
-            : message.replacingOccurrences(of: "\n", with: " "))
+        paste(ReviewComment.message(reviewComments))
         reviewComments = []
         terminal.window?.makeFirstResponder(terminal)
+    }
+
+    /// Types text into the terminal as one paste, without pressing Return.
+    func paste(_ text: String) {
+        // Without bracketed paste, each newline would press Return.
+        terminal.send(txt: terminal.getTerminal().bracketedPasteMode
+            ? "\u{1b}[200~\(text)\u{1b}[201~"
+            : text.replacingOccurrences(of: "\n", with: " "))
+    }
+
+    /// Pastes text and presses Return.
+    func submit(_ text: String) {
+        paste(text)
+        terminal.send(txt: "\r")
+        promptSent(text)
+    }
+
+    func promptSent(_ text: String) {
+        update { $0.promptSent(text) }
     }
 
     func markSeen() {

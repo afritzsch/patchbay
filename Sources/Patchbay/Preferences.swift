@@ -19,6 +19,8 @@ enum Preferences {
         /// Whether the new-session sheet starts sessions in a git repository in a new worktree.
         static let newWorktree = "newWorktree"
         static let customAgents = "customAgents"
+        /// Whether Claude in the app's terminals gets Patchbay's MCP tools.
+        static let agentTools = "agentTools"
         static let historyRetentionDays = "historyRetentionDays"
     }
 
@@ -33,7 +35,7 @@ enum Preferences {
             defaults.removeObject(forKey: "startClaude")
         }
         defaults.register(defaults: [
-            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.startAgent: Agent.claude.id,
+            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.agentTools: true, Keys.startAgent: Agent.claude.id,
             Keys.fontSize: defaultFontSize, Keys.historyRetentionDays: 90,
         ])
     }

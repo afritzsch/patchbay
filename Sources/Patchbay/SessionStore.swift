@@ -106,12 +106,16 @@ final class SessionStore {
         sessions.filter(\.needsAttention).count
     }
 
+    /// Answers the agents' Patchbay tools (`AgentTools.swift`).
+    @ObservationIgnored private var controlServer: ControlServer?
+
     init() {
         do {
             try ShellIntegration.install()
         } catch {
             NSLog("Patchbay: shell integration not installed: \(error)")
         }
+        controlServer = ControlServer { [unowned self] line, caller in await handleMCP(line, caller: caller) }
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
@@ -134,10 +138,11 @@ final class SessionStore {
     // MARK: - Sessions
 
     /// `restoring`: reopened from the last run, so it isn't focused, and isn't new to the recent folders or the history.
+    /// `select`: focus it (an agent's `new_session` doesn't, so the user's focus stays where it is).
     @discardableResult
     func newSession(id: UUID = UUID(), directory: String, name: String? = nil, agent: Agent?, prompt: String? = nil,
                     setup: String? = nil, resumeClaudeID: String? = nil, claudeArgs: [String] = [], restoring: Bool = false,
-                    splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
+                    select: Bool = true, splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
         let resume = resumeClaudeID.map { ["--resume", $0] } ?? []
         var command = agent?.commandLine(arguments: resume + claudeArgs, prompt: prompt)
         if let setup { command = [setup, command].compactMap { $0 }.joined(separator: " && ") }
@@ -158,14 +163,17 @@ final class SessionStore {
         session.onRecord = { [weak self] session, kind, text, exitCode, duration in
             self?.record(kind, session, text: text, exitCode: exitCode, duration: duration)
         }
+        if let prompt, !prompt.isEmpty, agent?.promptStyle ?? .unsupported != .unsupported { session.promptSent(prompt) }
         sessions.append(session)
         if let target, let layout, layout.contains(target) {
             self.layout = layout.inserting(session.id, at: target, zone: zone)
         }
         if !restoring {
             rememberDirectory(dir)
-            selectedID = session.id
-            if mode == .history { mode = .panes }
+            if select {
+                selectedID = session.id
+                if mode == .history { mode = .panes }
+            }
             record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
         }
         save()
@@ -495,6 +503,7 @@ final class SessionStore {
         var agentID: String?
         var claudeSessionID: String?
         var groupID: UUID?
+        var startedBy: UUID?
         /// Saved by older versions instead of `agentID`.
         var claude: Bool?
     }
@@ -504,7 +513,8 @@ final class SessionStore {
     func save() {
         let saved = sessions.filter(\.isAlive).map {
             SavedSession(id: $0.id, name: $0.customName, directory: $0.cwd, agentID: $0.agent?.id,
-                         claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil, groupID: $0.groupID)
+                         claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil, groupID: $0.groupID,
+                         startedBy: $0.startedBy)
         }
         let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) },
                      try? JSONEncoder().encode(groups)]
@@ -529,8 +539,10 @@ final class SessionStore {
             var agent = (item.agentID ?? (wasClaude ? Agent.claude.id : nil)).flatMap(Agent.named)
             if agent == .claude, !resume { agent = nil }
             let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
-            newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
-                       agent: agent, resumeClaudeID: claudeID, restoring: true).groupID = item.groupID
+            let session = newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
+                                     agent: agent, resumeClaudeID: claudeID, restoring: true)
+            session.groupID = item.groupID
+            session.startedBy = item.startedBy
         }
         groups = savedGroups
         tidyGroups()

@@ -5,7 +5,9 @@ import Foundation
 /// - a zsh `ZDOTDIR` wrapper that loads the user's own startup files unchanged, then reports the running
 ///   command and working directory, and wraps `claude` so it loads our hook settings;
 /// - `claude-settings.json`, passed to Claude Code with `--settings`, whose hooks call
-/// - `claude-hook.sh`, which appends each hook event to the session's events file.
+/// - `claude-hook.sh`, which appends each hook event to the session's events file;
+/// - `mcp-config.json`, passed with `--mcp-config`, whose server `patchbay-mcp.sh` connects Claude to the app's
+///   tools (`ControlServer`).
 ///
 /// The user's own `~/.claude/settings.json` and shell config are never modified.
 enum ShellIntegration {
@@ -17,6 +19,9 @@ enum ShellIntegration {
     static let zdotDir = supportDir.appendingPathComponent("zsh", isDirectory: true)
     static let hookScript = supportDir.appendingPathComponent("claude-hook.sh")
     static let claudeSettings = supportDir.appendingPathComponent("claude-settings.json")
+    static let mcpScript = supportDir.appendingPathComponent("patchbay-mcp.sh")
+    static let mcpConfig = supportDir.appendingPathComponent("mcp-config.json")
+    static let controlSocket = supportDir.appendingPathComponent("control.sock")
     /// Claude Code status line (configured in ~/.claude/settings.json); also saves plan usage for the app.
     static let statusLineScript = supportDir.appendingPathComponent("statusline.sh")
 
@@ -38,6 +43,7 @@ enum ShellIntegration {
         try fm.createDirectory(at: zdotDir, withIntermediateDirectories: true)
 
         try hookScriptSource.write(to: hookScript, atomically: true, encoding: .utf8)
+        try mcpScriptSource.write(to: mcpScript, atomically: true, encoding: .utf8)
         try statusLineSource.write(to: statusLineScript, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: statusLineScript.path)
 
@@ -45,8 +51,14 @@ enum ShellIntegration {
         let hooks = Dictionary(uniqueKeysWithValues: SessionEvent.hooks.map {
             ($0.rawValue, [["hooks": [["type": "command", "command": "\(command) \($0.rawValue)", "timeout": 5]]]])
         })
-        let settings = try JSONSerialization.data(withJSONObject: ["hooks": hooks], options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        // The tools that only look don't ask for permission.
+        let readOnly = [AgentTool.listSessions, .readOutput, .waitFor].map { "mcp__patchbay__\($0.rawValue)" }
+        let settings = try JSONSerialization.data(withJSONObject: ["hooks": hooks, "permissions": ["allow": readOnly]],
+                                                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try settings.write(to: claudeSettings, options: .atomic)
+        let mcp = ["mcpServers": ["patchbay": ["command": "/bin/sh", "args": [mcpScript.path]]]]
+        try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .withoutEscapingSlashes])
+            .write(to: mcpConfig, options: .atomic)
 
         for (name, source) in zshFiles {
             try source.write(to: zdotDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
@@ -73,6 +85,7 @@ enum ShellIntegration {
         env["PATCHBAY_SESSION_ID"] = sessionID.uuidString
         env["PATCHBAY_EVENTS_DIR"] = eventsDir.path
         env["PATCHBAY_CLAUDE_SETTINGS"] = claudeSettings.path
+        if UserDefaults.standard.bool(forKey: Preferences.Keys.agentTools) { env["PATCHBAY_MCP_CONFIG"] = mcpConfig.path }
         if shellIsZsh {
             env["PATCHBAY_USER_ZDOTDIR"] = env["ZDOTDIR"]
             env["ZDOTDIR"] = zdotDir.path
@@ -99,6 +112,14 @@ enum ShellIntegration {
     payload=$(cat | tr '\n\r\t' '   ' | cut -c1-4000)
     printf '%s\t%s\n' "$1" "$payload" 2>/dev/null >> "$PATCHBAY_EVENTS_DIR/$PATCHBAY_SESSION_ID.events"
     exit 0
+    """#
+
+    /// Claude's MCP server for the app's tools: relays the agent's messages to the control socket, first saying
+    /// which session it runs in.
+    private static let mcpScriptSource = #"""
+    #!/bin/sh
+    # Patchbay: connects an agent in a Patchbay terminal to the app's tools (MCP over stdio).
+    { printf '%s\n' "$PATCHBAY_SESSION_ID"; exec cat; } | exec nc -U \#(quote(controlSocket.path))
     """#
 
     private static let statusLineSource = #"""
@@ -174,7 +195,8 @@ enum ShellIntegration {
                 \#(ClaudeCode.subcommandsWithoutSettings.joined(separator: "|")))
                     eval "$_pb_claude \"\$@\"" ;;
                 *)
-                    eval "$_pb_claude --settings \"\$PATCHBAY_CLAUDE_SETTINGS\" \"\$@\"" ;;
+                    # --mcp-config takes several files, so an option must follow it.
+                    eval "$_pb_claude ${PATCHBAY_MCP_CONFIG:+--mcp-config \"\$PATCHBAY_MCP_CONFIG\"} --settings \"\$PATCHBAY_CLAUDE_SETTINGS\" \"\$@\"" ;;
             esac
         }
 
