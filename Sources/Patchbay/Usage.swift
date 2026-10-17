@@ -52,11 +52,7 @@ struct UsageBars: View {
         let usage = store.usage
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 7) {
-                if usage.fiveHour == nil && usage.sevenDay == nil {
-                    Text("Claude usage appears here after Claude's next reply.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
+                if usage.fiveHour != nil || usage.sevenDay != nil {
                     UsageBar(title: "5-hour", window: usage.fiveHour, now: context.date, weekly: false)
                     UsageBar(title: "Weekly", window: usage.sevenDay, now: context.date, weekly: true)
                     if let updated = usage.updatedAt {

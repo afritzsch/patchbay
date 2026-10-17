@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(SessionStore.self) private var store
+    @State private var showAllExternal = false
+    private let externalLimit = 3
 
     var body: some View {
         @Bindable var store = store
@@ -37,7 +39,7 @@ struct SidebarView: View {
             }
             if !store.externalSessions.isEmpty {
                 Section {
-                    ForEach(store.externalSessions) { external in
+                    ForEach(showAllExternal ? store.externalSessions : Array(store.externalSessions.prefix(externalLimit))) { external in
                         ExternalSessionRow(external: external)
                             .contextMenu {
                                 Button("Move Into Patchbay") {
@@ -48,6 +50,13 @@ struct SidebarView: View {
                                     NSPasteboard.general.setString(external.cwd, forType: .string)
                                 }
                             }
+                    }
+                    if store.externalSessions.count > externalLimit {
+                        Button(showAllExternal ? "Show Fewer" : "Show All (\(store.externalSessions.count))") {
+                            showAllExternal.toggle()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
                     }
                 } header: {
                     Text("Claude in Other Terminals")

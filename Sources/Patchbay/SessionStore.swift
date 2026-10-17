@@ -164,7 +164,7 @@ final class SessionStore {
         }
         if select {
             selectedID = session.id
-            mode = .panes
+            if mode == .history { mode = .panes }
             record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
         }
         save()
