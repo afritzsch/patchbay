@@ -10,13 +10,29 @@ enum DragPayload: Equatable {
     case external(ExternalSession)
 }
 
+/// A named section of the sidebar. Its sessions are kept together in `SessionStore.sessions`.
+struct SessionGroup: Codable, Identifiable {
+    var id = UUID()
+    var name: String
+    var isExpanded = true
+}
+
 @MainActor @Observable
 final class SessionStore {
+    /// In sidebar order: the groups' sessions in the groups' order, then the ungrouped ones.
     private(set) var sessions: [TerminalSession] = []
+    var groups: [SessionGroup] = [] {
+        didSet { save() }
+    }
+    /// The sessions picked with ⌘- or ⇧-click in the sidebar for a bulk action; empty, never one, otherwise.
+    var multiSelection: Set<UUID> = []
     /// The focused session. Selecting a session that isn't on screen puts it in the focused pane.
     var selectedID: UUID? {
         didSet {
-            if selectedID != oldValue { reveal(selectedID, replacing: oldValue) }
+            if selectedID != oldValue {
+                multiSelection = []
+                reveal(selectedID, replacing: oldValue)
+            }
             selectedSession?.markSeen()
         }
     }
@@ -192,6 +208,8 @@ final class SessionStore {
         record(.sessionClosed, session, text: session.agent.map { "Closed (\($0.name) was running)" } ?? "Closed")
         session.close()
         sessions.remove(at: index)
+        tidyGroups()
+        if multiSelection.remove(session.id) != nil, multiSelection.count < 2 { multiSelection = [] }
         layout = layout?.removing(session.id)
         if selectedID == session.id {
             // Focus a neighbouring pane; with no panes left, show the next session in the sidebar.
@@ -335,8 +353,11 @@ final class SessionStore {
 
     var paneCount: Int { layout?.sessionIDs.count ?? 0 }
 
-    func move(from source: IndexSet, to destination: Int) {
-        sessions.move(fromOffsets: source, toOffset: destination)
+    /// Replaces the panes with these sessions, in an even grid.
+    func showAsPanes(_ ids: [UUID]) {
+        guard let first = ids.first else { return }
+        layout = .grid(ids)
+        show(first)
         save()
     }
 
@@ -346,10 +367,47 @@ final class SessionStore {
         save()
     }
 
+    // MARK: - Groups
+
+    /// Puts these sessions in a new group and asks for its name.
+    func newGroup(with ids: [UUID]) {
+        let group = SessionGroup(name: "Group \(groups.count + 1)")
+        groups.append(group)
+        move(ids, to: group.id)
+        renamingID = group.id
+    }
+
+    /// Moves sessions into a group (nil: out of their groups), before the group's `index`-th session or at its end.
+    func move(_ ids: [UUID], to group: UUID?, at index: Int? = nil) {
+        let anchor = index.flatMap { sessions.filter { $0.groupID == group }.dropFirst($0).first { !ids.contains($0.id) } }
+        let moving = sessions.filter { ids.contains($0.id) }
+        sessions.removeAll { ids.contains($0.id) }
+        for session in moving { session.groupID = group }
+        sessions.insert(contentsOf: moving, at: anchor.flatMap { anchor in sessions.firstIndex { $0 === anchor } } ?? sessions.count)
+        tidyGroups()
+        multiSelection = []
+        save()
+    }
+
+    func renameGroup(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].name = trimmed
+    }
+
+    /// Drops groups left empty and sorts the sessions into their groups' order (a stable sort, so each keeps its place).
+    private func tidyGroups() {
+        groups.removeAll { group in !sessions.contains { $0.groupID == group.id } }
+        let order = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($1.id, $0) })
+        let rank = { (session: TerminalSession) in session.groupID.flatMap { order[$0] } ?? order.count }
+        sessions.sort { rank($0) < rank($1) }
+    }
+
     // MARK: - Navigation
 
     /// Focuses a session in the panes, leaving the overview or history.
     func show(_ id: UUID) {
+        multiSelection = []
         selectedID = id
         mode = .panes
     }
@@ -439,6 +497,7 @@ final class SessionStore {
         /// The agent running in it, restored by starting it again (Claude resumes `claudeSessionID` when there's a conversation).
         var agentID: String?
         var claudeSessionID: String?
+        var groupID: UUID?
         /// Saved by older versions instead of `agentID`.
         var claude: Bool?
     }
@@ -448,13 +507,15 @@ final class SessionStore {
     func save() {
         let saved = sessions.filter(\.isAlive).map {
             SavedSession(id: $0.id, name: $0.customName, directory: $0.cwd, agentID: $0.agent?.id,
-                         claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil)
+                         claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil, groupID: $0.groupID)
         }
-        let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) }]
+        let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) },
+                     try? JSONEncoder().encode(groups)]
         guard state != lastSaved else { return }
         lastSaved = state
         UserDefaults.standard.set(state[0], forKey: Preferences.Keys.savedSessions)
         UserDefaults.standard.set(state[1], forKey: Preferences.Keys.savedLayout)
+        UserDefaults.standard.set(state[2], forKey: Preferences.Keys.savedGroups)
     }
 
     private func restore() {
@@ -463,6 +524,8 @@ final class SessionStore {
         // Read before creating sessions: each new session saves, which would overwrite it.
         let savedLayout = UserDefaults.standard.data(forKey: Preferences.Keys.savedLayout)
             .flatMap { try? JSONDecoder().decode(PaneLayout.self, from: $0) }
+        let savedGroups = UserDefaults.standard.data(forKey: Preferences.Keys.savedGroups)
+            .flatMap { try? JSONDecoder().decode([SessionGroup].self, from: $0) } ?? []
         let resume = UserDefaults.standard.bool(forKey: Preferences.Keys.resumeClaude)
         for item in saved {
             let wasClaude = item.claude ?? (item.claudeSessionID != nil)
@@ -470,8 +533,10 @@ final class SessionStore {
             if agent == .claude, !resume { agent = nil }
             let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
             newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
-                       agent: agent, resumeClaudeID: claudeID, select: false)
+                       agent: agent, resumeClaudeID: claudeID, select: false).groupID = item.groupID
         }
+        groups = savedGroups
+        tidyGroups()
         layout = savedLayout?.keeping(Set(sessions.map(\.id)))
         selectedID = layout?.sessionIDs.first ?? sessions.first?.id
     }

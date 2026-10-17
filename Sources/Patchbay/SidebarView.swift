@@ -3,6 +3,8 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(SessionStore.self) private var store
     @State private var showAllExternal = false
+    /// Where a ⇧-click range starts: the row last clicked.
+    @State private var anchorID: UUID?
     @State private var tab = Tab.sessions
     private let externalLimit = 3
 
@@ -33,34 +35,28 @@ struct SidebarView: View {
     private var sessionList: some View {
         @Bindable var store = store
         List(selection: Binding(
-            get: { store.mode == .panes ? store.selectedID : nil },
-            set: { id in
-                if let id { store.show(id) } else { store.selectedID = nil }
+            get: {
+                if !store.multiSelection.isEmpty { return store.multiSelection }
+                return store.mode == .panes ? Set([store.selectedID].compactMap { $0 }) : []
+            },
+            set: { ids in
+                if ids.count > 1 { store.multiSelection = ids } else if let id = ids.first { store.show(id) } else { store.selectedID = nil }
             }
         )) {
-            Section {
-                ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
-                    SessionRow(session: session, index: index, onScreen: store.layout?.contains(session.id) == true)
-                        .tag(session.id)
-                        .overlay {
-                            RowDragSource(payload: .session(session.id), name: session.displayName,
-                                          toolTip: index < 9 ? "⌘\(index + 1)" : nil) {
-                                store.show(session.id)
-                            }
-                        }
-                        .contextMenu { SessionMenu(session: session) }
+            ForEach($store.groups) { $group in
+                Section(isExpanded: $group.isExpanded) {
+                    rows(in: group.id)
+                } header: {
+                    header(group.name, group: group.id)
+                        .contextMenu { GroupMenu(group: group) }
                 }
-                .onInsert(of: [.terminalSession]) { index, _ in store.dropInSidebar(at: index) }
-            } header: {
-                HStack {
-                    Text("Sessions")
-                    Spacer()
-                    if !store.sessions.isEmpty {
-                        Text(summary).monospacedDigit()
-                    }
+            }
+            if store.groups.isEmpty || store.sessions.contains(where: { $0.groupID == nil }) {
+                Section {
+                    rows(in: nil)
+                } header: {
+                    header(store.groups.isEmpty ? "Sessions" : "Ungrouped", group: nil)
                 }
-                // Sidebar headers run to the column edge; line up with the rows' trailing column instead.
-                .padding(.trailing, 14)
             }
             if !store.externalSessions.isEmpty {
                 Section {
@@ -109,12 +105,98 @@ struct SidebarView: View {
         }
     }
 
-    private var summary: String {
-        let working = store.sessions.filter { $0.isBusy && $0.status != .agentNeedsInput }.count
+    private func rows(in group: UUID?) -> some View {
+        ForEach(Array(store.sessions.enumerated()).filter { $0.element.groupID == group }, id: \.element.id) { index, session in
+            SessionRow(session: session, index: index, onScreen: store.layout?.contains(session.id) == true)
+                .tag(session.id)
+                .overlay {
+                    RowDragSource(payload: .session(session.id), name: session.displayName,
+                                  toolTip: index < 9 ? "⌘\(index + 1)" : nil) { click(session.id, $0) }
+                }
+                .contextMenu {
+                    if store.multiSelection.contains(session.id) { SelectionMenu() } else { SessionMenu(session: session) }
+                }
+        }
+        .onInsert(of: [.terminalSession]) { index, _ in store.dropInSidebar(at: index, group: group) }
+    }
+
+    private func header(_ title: String, group: UUID?) -> some View {
+        let sessions = store.sessions.filter { $0.groupID == group }
+        let working = sessions.filter { $0.isBusy && $0.status != .agentNeedsInput }.count
+        let waiting = sessions.filter(\.needsAttention).count
         var parts: [String] = []
         if working > 0 { parts.append("\(working) busy") }
-        if store.attentionCount > 0 { parts.append("\(store.attentionCount) waiting") }
-        return parts.joined(separator: " · ")
+        if waiting > 0 { parts.append("\(waiting) waiting") }
+        return HStack {
+            Text(title)
+            Spacer()
+            Text(parts.joined(separator: " · ")).monospacedDigit()
+        }
+        // Sidebar headers run to the column edge; line up with the rows' trailing column instead.
+        .padding(.trailing, 14)
+    }
+
+    /// A click focuses the session; ⌘-click adds it to the selection or takes it out, ⇧-click adds the rows
+    /// from the one clicked before.
+    private func click(_ id: UUID, _ modifiers: NSEvent.ModifierFlags) {
+        defer { anchorID = id }
+        guard modifiers.contains(.command) || modifiers.contains(.shift) else { return store.show(id) }
+        var picked = store.multiSelection.isEmpty ? Set([store.selectedID].compactMap { $0 }) : store.multiSelection
+        let ids = store.sessions.map(\.id)
+        if modifiers.contains(.shift), let from = ids.firstIndex(of: anchorID ?? store.selectedID ?? id),
+           let to = ids.firstIndex(of: id) {
+            picked.formUnion(ids[min(from, to)...max(from, to)])
+        } else if picked.remove(id) == nil {
+            picked.insert(id)
+        }
+        if picked.count > 1 { store.multiSelection = picked } else if let only = picked.first { store.show(only) }
+    }
+}
+
+/// The context menu of the sessions selected with ⌘- or ⇧-click.
+struct SelectionMenu: View {
+    @Environment(SessionStore.self) private var store
+
+    var body: some View {
+        let sessions = store.sessions.filter { store.multiSelection.contains($0.id) }
+        Button("Open \(sessions.count) as Panes") { store.showAsPanes(sessions.map(\.id)) }
+        MoveToGroupMenu(ids: sessions.map(\.id))
+        Divider()
+        Button("Close \(sessions.count) Sessions", role: .destructive) { store.confirmAndClose(sessions) }
+    }
+}
+
+/// The context menu of a group's header.
+struct GroupMenu: View {
+    @Environment(SessionStore.self) private var store
+    let group: SessionGroup
+
+    var body: some View {
+        let sessions = store.sessions.filter { $0.groupID == group.id }
+        Button("Open as Panes") { store.showAsPanes(sessions.map(\.id)) }
+        Button("Rename Group…") { store.renamingID = group.id }
+        Button("Ungroup") { store.move(sessions.map(\.id), to: nil) }
+        Divider()
+        Button("Close \(sessions.count) Sessions", role: .destructive) { store.confirmAndClose(sessions) }
+    }
+}
+
+struct MoveToGroupMenu: View {
+    @Environment(SessionStore.self) private var store
+    let ids: [UUID]
+
+    var body: some View {
+        Menu("Move to Group") {
+            Button("New Group…") { store.newGroup(with: ids) }
+            if !store.groups.isEmpty { Divider() }
+            ForEach(store.groups) { group in
+                Button(group.name) { store.move(ids, to: group.id) }
+            }
+            if store.sessions.contains(where: { ids.contains($0.id) && $0.groupID != nil }) {
+                Divider()
+                Button("Remove from Group") { store.move(ids, to: nil) }
+            }
+        }
     }
 }
 
@@ -129,6 +211,7 @@ struct SessionMenu: View {
         }
         Button("Rename…") { store.renamingID = session.id }
         Button("Show History") { store.showHistory(for: session) }
+        MoveToGroupMenu(ids: [session.id])
         if let focused = store.selectedID, focused != session.id, store.layout != nil {
             Button("Open in Split Right") { store.drop(session: session.id, on: focused, zone: .right) }
             Button("Open in Split Below") { store.drop(session: session.id, on: focused, zone: .bottom) }
@@ -279,7 +362,7 @@ struct RowDragSource: NSViewRepresentable {
     let payload: DragPayload
     let name: String
     let toolTip: String?
-    var onClick: (() -> Void)?
+    var onClick: ((NSEvent.ModifierFlags) -> Void)?
 
     func makeNSView(context: Context) -> RowDragSourceView { RowDragSourceView() }
 
@@ -296,7 +379,7 @@ final class RowDragSourceView: NSView, NSDraggingSource {
     weak var store: SessionStore?
     var payload: DragPayload?
     var name = ""
-    var onClick: (() -> Void)?
+    var onClick: ((NSEvent.ModifierFlags) -> Void)?
     /// Where the left button went down, until a drag starts.
     private var mouseDownLocation: NSPoint?
     /// The pane the dragged session is shown in, marked while the drag lasts.
@@ -323,7 +406,7 @@ final class RowDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if mouseDownLocation != nil { onClick?() }
+        if mouseDownLocation != nil { onClick?(event.modifierFlags) }
         mouseDownLocation = nil
     }
 

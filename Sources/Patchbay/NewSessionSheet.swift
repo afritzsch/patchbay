@@ -7,6 +7,14 @@ struct NewSessionSheet: View {
     @State private var directory = ""
     @State private var name = ""
     @State private var prompt = ""
+    @AppStorage(Preferences.Keys.newWorktree) private var newWorktree = false
+    /// The folder's repository; nil outside one.
+    @State private var repo: GitRepo?
+    @State private var branch = ""
+    @State private var base = ""
+    @State private var fallbackBranch = "patchbay/" + UUID().uuidString.prefix(6).lowercased()
+    @State private var isWorking = false
+    @State private var error: String?
 
     var body: some View {
         Form {
@@ -20,6 +28,24 @@ struct NewSessionSheet: View {
                     Button("Choose…", action: chooseDirectory)
                 }
                 TextField("Name", text: $name, prompt: Text((directory as NSString).lastPathComponent))
+            }
+            if let repo {
+                Section {
+                    Toggle("New worktree", isOn: $newWorktree)
+                    if newWorktree {
+                        TextField("Branch", text: $branch, prompt: Text(suggestedBranch))
+                        if repo.branches.contains(branchName) {
+                            LabeledContent("Based on", value: "Checks out the existing branch")
+                        } else {
+                            Picker("Based on", selection: $base) {
+                                ForEach(repo.branches, id: \.self) { Text($0).tag($0) }
+                            }
+                        }
+                        if let error {
+                            Text(error).foregroundStyle(.red)
+                        }
+                    }
+                }
             }
             Section {
                 Picker("Start", selection: $startAgent) {
@@ -40,20 +66,49 @@ struct NewSessionSheet: View {
                 Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Start") {
-                    store.newSession(directory: directory, name: name.isEmpty ? nil : name,
-                                     agent: agent, prompt: prompt)
-                    dismiss()
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Start", action: start)
+                        .disabled(directory.isEmpty)
                 }
-                .disabled(directory.isEmpty)
             }
         }
         .onAppear {
             directory = store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
         }
+        .task(id: directory) {
+            let directory = directory
+            repo = await inBackground { Git.repository(at: directory) }
+            base = repo?.current ?? repo?.branches.first ?? ""
+        }
     }
 
     private var agent: Agent? { Agent.named(startAgent) }
+
+    private var suggestedBranch: String {
+        let slug = Git.branchName(for: name)
+        return slug.isEmpty ? fallbackBranch : slug
+    }
+
+    private var branchName: String { branch.isEmpty ? suggestedBranch : branch }
+
+    private func start() {
+        guard let repo, newWorktree else { return open(directory) }
+        let (directory, branch, path) = (directory, branchName, repo.worktreePath(for: branchName))
+        let base = repo.branches.contains(branch) ? nil : base
+        isWorking = true
+        Task {
+            error = await inBackground { Git.addWorktree(in: directory, branch: branch, base: base, at: path) }
+            isWorking = false
+            if error == nil { open(path) }
+        }
+    }
+
+    private func open(_ folder: String) {
+        store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt)
+        dismiss()
+    }
 
     private var directoryChoices: [String] {
         var dirs = store.recentDirectories

@@ -40,7 +40,8 @@ struct ContentView: View {
         .sheet(isPresented: $store.showNewSessionSheet) {
             NewSessionSheet()
         }
-        .alert("Rename Session", isPresented: Binding(
+        // renamingID is a session's or a group's.
+        .alert(renamingGroup != nil ? "Rename Group" : "Rename Session", isPresented: Binding(
             get: { store.renamingID != nil },
             set: { if !$0 { store.renamingID = nil } }
         )) {
@@ -48,17 +49,21 @@ struct ContentView: View {
             Button("Rename") {
                 if let session = store.sessions.first(where: { $0.id == store.renamingID }) {
                     store.rename(session, to: renameText)
+                } else if let group = renamingGroup {
+                    store.renameGroup(group.id, to: renameText)
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Leave empty to name it after its folder.")
+            if renamingGroup == nil { Text("Leave empty to name it after its folder.") }
         }
         .onChange(of: store.renamingID) {
-            renameText = store.sessions.first { $0.id == store.renamingID }?.customName ?? ""
+            renameText = renamingGroup?.name ?? store.sessions.first { $0.id == store.renamingID }?.customName ?? ""
         }
         .background(WindowAccessor())
     }
+
+    private var renamingGroup: SessionGroup? { store.groups.first { $0.id == store.renamingID } }
 
     private var title: String {
         switch store.mode {

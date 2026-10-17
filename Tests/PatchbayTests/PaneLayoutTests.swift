@@ -76,6 +76,16 @@ struct PaneLayoutTests {
         #expect(split(layout.equalized())?.fractions == Array(repeating: 1.0 / 3, count: 3))
     }
 
+    @Test func grid() {
+        let d = UUID(), e = UUID()
+        #expect(PaneLayout.grid([a]) == .pane(a))
+        #expect(split(.grid([a, b]))?.axis == .horizontal)
+        let five = PaneLayout.grid([a, b, c, d, e])
+        #expect(five.sessionIDs == [a, b, c, d, e])
+        #expect(split(five)?.axis == .vertical)
+        #expect(split(five)?.children.map(\.sessionIDs) == [[a, b, c], [d, e]])
+    }
+
     @Test func resizingKeepsBothNeighboursAboveTheMinimum() {
         let fractions = resized([0.5, 0.5], at: 0, by: 0.4, minimum: 0.2)
         #expect(fractions[0] == 0.8)

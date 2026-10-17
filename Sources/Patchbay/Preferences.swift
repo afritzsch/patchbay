@@ -7,6 +7,7 @@ enum Preferences {
         static let recentDirectories = "recentDirectories"
         static let savedSessions = "savedSessions"
         static let savedLayout = "savedLayout"
+        static let savedGroups = "savedGroups"
         static let overviewColumns = "overviewColumns"
         static let overviewColumnFractions = "overviewColumnFractions"
         static let overviewRowFractions = "overviewRowFractions"
@@ -15,6 +16,8 @@ enum Preferences {
         static let notify = "notify"
         /// An agent's id, or "shell": what the new-session sheet starts.
         static let startAgent = "startAgent"
+        /// Whether the new-session sheet starts sessions in a git repository in a new worktree.
+        static let newWorktree = "newWorktree"
         static let customAgents = "customAgents"
         static let historyRetentionDays = "historyRetentionDays"
     }

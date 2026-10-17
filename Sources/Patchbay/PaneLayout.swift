@@ -38,6 +38,17 @@ enum PaneLayout: Codable, Equatable {
 
     func contains(_ id: UUID) -> Bool { sessionIDs.contains(id) }
 
+    /// Rows of equal panes, about as many rows as columns: 4 sessions make 2 × 2, 5 make 3 over 2.
+    static func grid(_ ids: [UUID]) -> PaneLayout {
+        let columns = Int(Double(ids.count).squareRoot().rounded(.up))
+        let rows = stride(from: 0, to: ids.count, by: columns).map { ids[$0..<min($0 + columns, ids.count)] }
+        func even(_ axis: SplitAxis, _ children: [PaneLayout]) -> PaneLayout {
+            children.count == 1 ? children[0] : .split(id: UUID(), axis: axis, children: children,
+                                                       fractions: Array(repeating: 1 / Double(children.count), count: children.count))
+        }
+        return even(.vertical, rows.map { even(.horizontal, $0.map(PaneLayout.pane)) })
+    }
+
     /// The tree without `id`'s pane; a split left with one child is replaced by that child, and one left along
     /// its parent's axis is merged into the parent, so a row never holds another row.
     func removing(_ id: UUID) -> PaneLayout? {

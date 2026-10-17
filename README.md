@@ -9,10 +9,20 @@ with a sidebar that shows what each one is doing.
   *Running `npm test`*, *Idle*) and how long it's been in that state. Agent sessions are titled by your last
   prompt (or the name you chose), with the question the agent is asking, if any, and the folder below. Drag to
   reorder, right-click to rename / open a sibling shell / show in Finder.
+- **Groups and bulk selection**: ⌘-click or ⇧-click sessions in the sidebar to select several, then right-click
+  to open them as an even grid of panes, move them to a group, or close them all. Groups are named, collapsible
+  sidebar sections (right-click a session → *Move to Group* → *New Group…*); drag a session into one to move it
+  there, right-click a group's header to rename it, open or close all its sessions, or ungroup it. A group goes
+  away when its last session leaves.
 - **Git state**: the folder line also shows the branch, changed files (`●3`) and commits ahead / behind
   (`↑1 ↓2`), in the sidebar, pane headers and overview cards.
 - **Changes**: the *Changes* tab in the sidebar is source control for the focused session's repository: stage,
   unstage, discard (asks first) and commit (⌘↩). Click a file to see its diff beside the panes.
+- **Worktrees**: in a git repository, ⌘N can start the session in a new worktree (a second checkout on its own
+  branch, in `~/.patchbay/worktrees/<repo>/<branch>`), so several agents can work on one repository without
+  getting in each other's way. The branch is named after the session; naming an existing branch checks it out.
+  Sessions in a worktree show its branch with a dashed icon. Closing the last session in one asks whether to
+  delete the worktree too (its branch is kept if it has unmerged commits).
 - **Split panes**: drag a session from the sidebar (or a pane by its title bar) onto a pane: an edge splits,
   the centre swaps. Drag the dividers to resize (double-click to even out). The × on a pane removes it from the
   screen while the session keeps running.
