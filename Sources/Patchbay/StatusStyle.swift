@@ -105,8 +105,9 @@ struct GitBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Label(git.branch, systemImage: "arrow.triangle.branch")
+            Label(git.branch, systemImage: git.isWorktree ? "square.on.square.dashed" : "arrow.triangle.branch")
                 .lineLimit(1)
+                .help(git.isWorktree ? "In a worktree: a second checkout of the repository" : "")
             if git.changed > 0 { Text("●\(git.changed)").foregroundStyle(.orange) }
             if git.ahead > 0 { Text("↑\(git.ahead)") }
             if git.behind > 0 { Text("↓\(git.behind)") }

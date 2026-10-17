@@ -9,7 +9,22 @@ struct GitInfo: Equatable {
     var root: String
     /// Staged, unstaged and untracked files.
     var changes: [GitChange]
+    /// A second checkout (`git worktree add`), not the repository's main one.
+    var isWorktree = false
     var changed: Int { changes.count }
+    /// A worktree this app made, which it may offer to delete.
+    var isOwnWorktree: Bool { root.hasPrefix(Git.worktreesFolder + "/") }
+}
+
+/// A repository's local branches, for starting a session in a new worktree.
+struct GitRepo: Sendable {
+    /// The main checkout's folder name.
+    var name: String
+    /// nil when HEAD is detached.
+    var current: String?
+    var branches: [String]
+
+    func worktreePath(for branch: String) -> String { "\(Git.worktreesFolder)/\(name)/\(branch)" }
 }
 
 /// One line of `git status`: the status letters of the index and of the working tree (" " for none, "?" untracked).
@@ -42,10 +57,35 @@ struct DiffLine: Identifiable, Equatable {
 enum Git {
     /// nil when `directory` isn't in a git repository. Blocking: call off the main thread.
     static func info(at directory: String) -> GitInfo? {
-        guard let root = run(["rev-parse", "--show-toplevel"], in: directory)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // A worktree's own git dir differs from the shared one.
+        guard let paths = run(["rev-parse", "--show-toplevel", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+                              in: directory)?.split(separator: "\n"), paths.count == 3,
               let status = run(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], in: directory)
         else { return nil }
-        return parse(status: status, root: root)
+        var info = parse(status: status, root: String(paths[0]))
+        info.isWorktree = paths[1] != paths[2]
+        return info
+    }
+
+    /// Where new worktrees go: outside the repository, so they don't show up in its `git status`, and without
+    /// spaces, which some build tools break on.
+    static let worktreesFolder = NSHomeDirectory() + "/.patchbay/worktrees"
+
+    /// A branch name from a session name: "Fix login bug!" → "fix-login-bug".
+    static func branchName(for name: String) -> String {
+        name.lowercased().split { !$0.isLetter && !$0.isNumber }.joined(separator: "-")
+    }
+
+    /// nil when `directory` isn't in a git repository. Blocking: call off the main thread.
+    static func repository(at directory: String) -> GitRepo? {
+        guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: directory),
+              let list = run(["branch", "--format=%(HEAD)%(refname:short)"], in: directory) else { return nil }
+        // "*main", " other"; a detached HEAD is listed as "*(HEAD detached at 1234567)".
+        let lines = list.split(separator: "\n").filter { !$0.dropFirst().hasPrefix("(") }
+        let name = URL(fileURLWithPath: common.trimmingCharacters(in: .whitespacesAndNewlines))
+            .deletingLastPathComponent().lastPathComponent
+        return GitRepo(name: name, current: lines.first { $0.hasPrefix("*") }.map { String($0.dropFirst()) },
+                       branches: lines.map { String($0.dropFirst()) })
     }
 
     /// Reads `git status --porcelain=v2 --branch -z`: `# branch.*` headers, then an entry per changed file, whose
@@ -138,6 +178,21 @@ enum Git {
 
     static func commit(_ message: String, in root: String) -> String? {
         perform(["commit", "-m", message], in: root, timeout: 60)
+    }
+
+    /// A worktree at `path` on a new `branch` starting at `base`, or on the existing `branch` when `base` is nil.
+    static func addWorktree(in directory: String, branch: String, base: String?, at path: String) -> String? {
+        perform(["worktree", "add"] + (base.map { ["-b", branch, path, $0] } ?? [path, branch]), in: directory, timeout: 60)
+    }
+
+    /// Deletes a worktree with its uncommitted changes, then its branch unless that has unmerged commits.
+    static func removeWorktree(_ path: String) -> String? {
+        guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return "\(path) isn't a git worktree." }
+        let branch = run(["branch", "--show-current"], in: path)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let error = perform(["worktree", "remove", "--force", path], in: common, timeout: 30) { return error }
+        if !branch.isEmpty { _ = perform(["branch", "-d", branch], in: common) }
+        return nil
     }
 
     private static func perform(_ arguments: [String], in directory: String, timeout: TimeInterval = 10) -> String? {

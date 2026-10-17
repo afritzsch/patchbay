@@ -7,6 +7,8 @@ import SwiftTerm
 final class TerminalSession: Identifiable {
     let id: UUID
     var customName: String?
+    /// The sidebar group it is in; set through `SessionStore.move(_:to:at:)`, which keeps the order right.
+    var groupID: UUID?
     /// The terminal title; Claude Code sets it to a summary of the current task.
     var title = ""
     private(set) var state: SessionState

@@ -28,6 +28,17 @@ struct GitParserTests {
         #expect(info.changes.map(\.isUnstaged) == [true, false, true, true])
     }
 
+    @Test func branchName() {
+        #expect(Git.branchName(for: "Fix login bug!") == "fix-login-bug")
+        #expect(Git.branchName(for: "  Über 2.0 ") == "über-2-0")
+        #expect(Git.branchName(for: "") == "")
+    }
+
+    @Test func worktreePath() {
+        let repo = GitRepo(name: "patchbay", current: "main", branches: ["main"])
+        #expect(repo.worktreePath(for: "patchbay/abc") == NSHomeDirectory() + "/.patchbay/worktrees/patchbay/patchbay/abc")
+    }
+
     @Test func detachedHead() {
         let info = Git.parse(status: "# branch.oid abcdef123456\0# branch.head (detached)\0", root: "/repo")
         #expect(info.branch == "abcdef1")
