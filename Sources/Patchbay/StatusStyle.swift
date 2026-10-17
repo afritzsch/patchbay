@@ -8,6 +8,7 @@ extension TerminalSession {
         case .idle: "Idle"
         case .running: "Running"
         case .agentReady: "Waiting for prompt"
+        case .agentWorking where runningSubagents > 0: "Waiting for agent"
         case .agentWorking: currentTool.map { "Working · \($0)" } ?? "Working"
         case .agentNeedsInput: "Needs your input"
         case .agentDone: "Done"

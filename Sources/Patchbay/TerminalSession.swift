@@ -35,6 +35,8 @@ final class TerminalSession: Identifiable {
     /// Latest Claude notification, or what a finished command did.
     private(set) var message: String?
     private(set) var currentTool: String?
+    /// Subagent calls (Task/Agent tool) that have started but not finished.
+    private(set) var runningSubagents = 0
     /// Something happened the user hasn't looked at yet (Claude finished, a long command ended, a bell).
     var unseen = false
     /// The working tree's git state; nil outside a repository.
@@ -185,14 +187,17 @@ final class TerminalSession: Identifiable {
             promptStarted = Date()
             message = nil
             currentTool = nil
+            runningSubagents = 0
             unseen = false
             setStatus(.agentWorking)
         case "PreToolUse":
             claudeEvent()
             currentTool = HookPayload(payload)["tool_name"]
+            if Self.isSubagentTool(currentTool) { runningSubagents += 1 }
             if status != .agentNeedsInput { setStatus(.agentWorking) }
         case "PostToolUse":
             claudeEvent()
+            if Self.isSubagentTool(HookPayload(payload)["tool_name"]) { runningSubagents = max(0, runningSubagents - 1) }
             currentTool = nil
             setStatus(.agentWorking)
         case "Notification":
@@ -200,7 +205,7 @@ final class TerminalSession: Identifiable {
             let text = HookPayload(payload)["message"] ?? "Claude needs your attention"
             if text.localizedCaseInsensitiveContains("waiting for your input") {
                 // The idle reminder after a finished turn, not a question.
-                if status != .agentDone { setStatus(.agentReady) }
+                if status != .agentDone, runningSubagents == 0 { setStatus(.agentReady) }
                 return
             }
             message = text
@@ -210,6 +215,7 @@ final class TerminalSession: Identifiable {
         case "Stop":
             claudeEvent()
             currentTool = nil
+            runningSubagents = 0
             message = nil
             gitStale = true
             setStatus(.agentDone)
@@ -222,11 +228,14 @@ final class TerminalSession: Identifiable {
         case "SessionEnd":
             agent = nil
             currentTool = nil
+            runningSubagents = 0
             setStatus(.idle)
         default:
             break
         }
     }
+
+    private static func isSubagentTool(_ name: String?) -> Bool { name == "Task" || name == "Agent" }
 
     /// A Claude Code hook event: Claude is running, and its hooks (not the shell's command line) now track it.
     private func claudeEvent() {
@@ -237,7 +246,7 @@ final class TerminalSession: Identifiable {
     /// Claude's spinner redraws the screen continuously while it works, so a "working" session that has
     /// been silent for a while was interrupted (Esc/Ctrl-C fire no hook) and is waiting for the user.
     func checkForSilence() {
-        if status == .agentWorking, Date().timeIntervalSince(lastOutput) > 8 {
+        if status == .agentWorking, runningSubagents == 0, Date().timeIntervalSince(lastOutput) > 8 {
             currentTool = nil
             setStatus(.agentReady)
         }
