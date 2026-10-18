@@ -17,7 +17,7 @@ extension AppDelegate {
     private func runDevAction(_ action: String?, _ arg: String, dir: String) {
         switch action {
         case "snapshot":
-            guard let view = mainWindow?.contentView?.superview,
+            guard let view = (mainWindow?.attachedSheet ?? mainWindow)?.contentView?.superview,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
             // SwiftTerm paints its background on the layer, which cacheDisplay skips; redraw terminals over it.
