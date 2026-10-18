@@ -68,12 +68,7 @@ struct AutomationRow: View {
                         .foregroundStyle(.red)
                 }
                 HStack(spacing: 6) {
-                    Text(Agent.named(automation.agentID)?.name ?? "Shell")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(.purple.opacity(0.18), in: .rect(cornerRadius: 3))
-                        .foregroundStyle(.purple)
+                    AgentBadge(name: automation.agentName)
                     Text((automation.folder as NSString).abbreviatingWithTildeInPath)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)

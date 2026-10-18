@@ -298,14 +298,7 @@ struct SessionRow: View {
                         .truncationMode(.tail)
                 }
                 HStack(spacing: 6) {
-                    if let agent = session.agent {
-                        Text(agent.name)
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.purple.opacity(0.18), in: .rect(cornerRadius: 3))
-                            .foregroundStyle(.purple)
-                    }
+                    if let agent = session.agent { AgentBadge(name: agent.name) }
                     Text(session.abbreviatedCwd)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -316,6 +309,20 @@ struct SessionRow: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+/// The agent's name in a purple tag, in the sidebar's rows.
+struct AgentBadge: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(.purple.opacity(0.18), in: .rect(cornerRadius: 3))
+            .foregroundStyle(.purple)
     }
 }
 

@@ -57,7 +57,7 @@ extension AppDelegate {
             guard let change = store.selectedSession?.git?.changes.first(where: { $0.path == path }) else {
                 return print("dev: no change at \(path)")
             }
-            store.selectedChange = ChangeSelection(path: path, staged: staged, untracked: change.worktree == "?")
+            store.selectedChange = ChangeSelection(path: path, staged: staged, untracked: change.isUntracked)
         case "type":
             store.selectedSession?.terminal.send(txt: arg)
         case "menu":

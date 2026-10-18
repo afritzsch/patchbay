@@ -298,7 +298,7 @@ final class SessionStore {
     func openInEditor(path: String, line: Int) {
         let change = selectedSession?.git?.changes.first { $0.path == path }
         editorTarget = (path, line)
-        selectedChange = ChangeSelection(path: path, staged: false, untracked: change?.worktree == "?")
+        selectedChange = ChangeSelection(path: path, staged: false, untracked: change?.isUntracked == true)
     }
 
     /// Reads the git state of the stale sessions' folders (every session's with `all`) off the main thread;
@@ -530,8 +530,6 @@ final class SessionStore {
         var claudeSessionID: String?
         var groupID: UUID?
         var startedBy: UUID?
-        /// Saved by older versions instead of `agentID`.
-        var claude: Bool?
     }
 
     @ObservationIgnored private var lastSaved: [Data?] = []
@@ -561,8 +559,7 @@ final class SessionStore {
             .flatMap { try? JSONDecoder().decode([SessionGroup].self, from: $0) } ?? []
         let resume = UserDefaults.standard.bool(forKey: Preferences.Keys.resumeClaude)
         for item in saved {
-            let wasClaude = item.claude ?? (item.claudeSessionID != nil)
-            var agent = (item.agentID ?? (wasClaude ? Agent.claude.id : nil)).flatMap(Agent.named)
+            var agent = item.agentID.flatMap(Agent.named)
             if agent == .claude, !resume { agent = nil }
             let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
             let session = newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,

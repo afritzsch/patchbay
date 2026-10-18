@@ -71,6 +71,7 @@ struct GitChange: Identifiable, Equatable {
     var id: String { path }
     var isStaged: Bool { !" ?U".contains(index) }
     var isUnstaged: Bool { worktree != " " }
+    var isUntracked: Bool { worktree == "?" }
 }
 
 /// A row selected in the source control tab. A file can be in both the staged and the unstaged list.
@@ -250,7 +251,7 @@ enum Git {
 
     /// Throws away the working tree version: restores a tracked file, deletes an untracked one.
     static func discard(_ change: GitChange, in root: String) -> String? {
-        perform(change.worktree == "?" ? ["clean", "-f", "--", change.path] : ["restore", "--", change.path], in: root)
+        perform(change.isUntracked ? ["clean", "-f", "--", change.path] : ["restore", "--", change.path], in: root)
     }
 
     static func commit(_ message: String, in root: String) -> String? {

@@ -153,7 +153,7 @@ struct ChangesView: View {
             stageButton([change.path], staged: staged, root: root)
                 .help(staged ? "Unstage" : "Stage")
         }
-        .tag(ChangeSelection(path: change.path, staged: staged, untracked: change.worktree == "?"))
+        .tag(ChangeSelection(path: change.path, staged: staged, untracked: change.isUntracked))
         .help(change.path)
     }
 
