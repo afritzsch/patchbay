@@ -57,9 +57,14 @@ struct NewSessionSheet: View {
                     Text("Shell").tag("shell")
                     ForEach(Agent.all) { Text($0.name).tag($0.id) }
                 }
-                if let agent, agent.promptStyle != .unsupported {
-                    TextField("First prompt", text: $prompt, prompt: Text("Optional"), axis: .vertical)
-                        .lineLimit(2...5)
+            }
+            if let agent, agent.promptStyle != .unsupported {
+                Section("First prompt") {
+                    TextField("First prompt", text: $prompt, prompt: Text("What should \(agent.name) do? (optional)"),
+                              axis: .vertical)
+                        .labelsHidden()
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4...12)
                 }
             }
         }
