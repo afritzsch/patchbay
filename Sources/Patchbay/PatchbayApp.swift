@@ -158,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         store.save()
         store.history.flush()
         for session in store.sessions { session.close() }
+        store.languageServers.terminateAll()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

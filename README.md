@@ -23,6 +23,11 @@ with a sidebar that shows what each one is doing.
   itself, highlighted, with line numbers; new and changed lines are tinted green and removed ones marked red as you
   type. ⌘F there opens find and replace; ⌘S saves, and leaving the file saves it too. Without unsaved edits it
   follows the file on disk, so an agent's changes show up.
+- **Language servers**: with a language server for the file, the editor underlines errors and warnings (the
+  status bar counts them, click to go to the next; *Send Errors* adds them to the review comments for the agent),
+  completes while typing or on Esc, shows what is under the cursor, and ⌘-click goes to a definition. Swift's
+  (sourcekit-lsp) comes with Xcode; TypeScript, Python, Go and Rust servers are used when installed, and others
+  can be added in Settings. sourcekit-lsp indexes into the package's `.build/index-build`.
 - **Worktrees**: in a git repository, ⌘N can start the session in a new worktree (a second checkout on its own
   branch, in `~/.patchbay/worktrees/<repo>/<branch>`), so several agents can work on one repository without
   getting in each other's way. The branch is named after the session; naming an existing branch checks it out.

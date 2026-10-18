@@ -49,6 +49,8 @@ final class SessionStore {
     private(set) var externalSessions: [ExternalSession] = []
     /// The file selected in the Changes tab, whose diff is shown beside the panes.
     var selectedChange: ChangeSelection?
+    /// A file and 1-based line for the diff inspector to open in its editor, e.g. after ⌘-clicking a definition.
+    var editorTarget: (path: String, line: Int)?
     /// What the main area shows.
     var mode: MainMode = .panes {
         didSet { if mode != .history { selectedSession?.markSeen() } }
@@ -65,6 +67,7 @@ final class SessionStore {
         }
     }
     let history = HistoryStore()
+    let languageServers = LanguageServers()
     let usage = UsageMonitor()
     /// Limits the history view to one session.
     var historySessionFilter: UUID?
@@ -282,6 +285,13 @@ final class SessionStore {
     @ObservationIgnored private var gitRefreshInFlight = false
     /// The Changes tab is showing: the focused session's git state is refreshed every second.
     @ObservationIgnored var watchingChanges = false
+
+    /// Opens a file of the focused session's repository in the inspector's editor, changed or not.
+    func openInEditor(path: String, line: Int) {
+        let change = selectedSession?.git?.changes.first { $0.path == path }
+        editorTarget = (path, line)
+        selectedChange = ChangeSelection(path: path, staged: false, untracked: change?.worktree == "?")
+    }
 
     /// Reads the git state of the stale sessions' folders (every session's with `all`) off the main thread;
     /// one `git` run per distinct folder.

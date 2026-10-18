@@ -50,12 +50,17 @@ struct DiffView: View {
         .task(id: selection) {
             lines = []
             commenting = nil
+            editLine = nil
+            if let target = store.editorTarget, target.path == selection.path {
+                (editing, editLine) = (true, target.line)
+                store.editorTarget = nil
+            }
             while !Task.isCancelled {
                 if let root = store.selectedSession?.git?.root {
                     let diff = await inBackground { Git.diff(of: selection, in: root) } ?? ""
                     let fresh = Git.parseDiff(diff)
                     if fresh != lines {
-                        if lines.isEmpty { editLine = fresh.first { $0.kind != .hunk }?.new }
+                        if lines.isEmpty, editLine == nil { editLine = fresh.first { $0.kind != .hunk }?.new }
                         lines = fresh
                     }
                 }
@@ -320,6 +325,12 @@ struct ReviewComment: Identifiable, Equatable {
         self.path = path
         self.lines = (first == last ? "\(first)" : "\(first)-\(last)") + (new.isEmpty ? " (removed)" : "")
         self.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    init(path: String, line: Int, text: String) {
+        self.path = path
+        self.lines = "\(line)"
+        self.text = text
     }
 
     static func message(_ comments: [ReviewComment]) -> String {
