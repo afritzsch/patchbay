@@ -11,6 +11,8 @@ enum AgentTool: String, CaseIterable {
     case waitFor = "wait_for"
     case closeSession = "close_session"
     case createAutomation = "create_automation"
+    case listAutomations = "list_automations"
+    case deleteAutomation = "delete_automation"
 
     static let weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
@@ -21,7 +23,8 @@ enum AgentTool: String, CaseIterable {
         with new_session (with a branch, so it works in its own git worktree), wait_for it, read_output to see what \
         it did, send_input to follow up. You can type into and close only the sessions you started. When one asks \
         for permission, leave that to the user. For work the user wants done regularly, such as a daily review, \
-        create_automation has Patchbay start a session on a schedule.
+        create_automation has Patchbay start a session on a schedule; list_automations and delete_automation \
+        manage them.
         """
 
     var description: String {
@@ -47,6 +50,8 @@ enum AgentTool: String, CaseIterable {
             open; a run missed while it was closed starts once it's back. The user sees, edits and deletes it in the \
             sidebar's Automations tab. Returns it with its next run.
             """
+        case .listAutomations: "Lists Patchbay's automations with their id, prompt, schedule, next and last run, and last error."
+        case .deleteAutomation: "Deletes an automation. The sessions it already started keep running."
         }
     }
 
@@ -66,6 +71,8 @@ enum AgentTool: String, CaseIterable {
         case .sendInput: ["session": session, "text": ["type": "string"], "submit": ["type": "boolean"]]
         case .waitFor: ["session": session, "timeout": ["type": "integer", "description": "Seconds (default 300)"]]
         case .closeSession: ["session": session]
+        case .listAutomations: [:]
+        case .deleteAutomation: ["automation": ["type": "string", "description": "The automation's id from list_automations"]]
         case .createAutomation: [
             "folder": ["type": "string", "description": "Absolute path; default your own folder"],
             "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
@@ -81,10 +88,11 @@ enum AgentTool: String, CaseIterable {
 
     private var required: [String] {
         switch self {
-        case .listSessions, .newSession: []
+        case .listSessions, .newSession, .listAutomations: []
         case .readOutput, .waitFor, .closeSession: ["session"]
         case .sendInput: ["session", "text"]
         case .createAutomation: ["prompt", "repeat"]
+        case .deleteAutomation: ["automation"]
         }
     }
 
@@ -164,6 +172,15 @@ extension SessionStore {
             return "Closed."
         case .createAutomation:
             return try json(describe(try await createAutomation(args, caller: caller)))
+        case .listAutomations:
+            return try json(automations.map(describe))
+        case .deleteAutomation:
+            let id = args["automation"] as? String ?? ""
+            guard let automation = automations.first(where: { $0.id.uuidString.caseInsensitiveCompare(id) == .orderedSame }) else {
+                throw ToolError(message: "No automation \(id); see list_automations.")
+            }
+            deleteAutomation(automation.id)
+            return "Deleted."
         }
     }
 
@@ -285,8 +302,11 @@ extension SessionStore {
 
     private func describe(_ automation: Automation) -> [String: Any] {
         [
-            "id": automation.id.uuidString, "name": automation.title, "schedule": automation.schedule,
-            "next_run": automation.nextRun?.formatted(date: .complete, time: .shortened), "folder": automation.folder,
+            "id": automation.id.uuidString, "name": automation.title, "prompt": automation.prompt,
+            "schedule": automation.schedule, "paused": automation.isEnabled ? nil : true,
+            "next_run": automation.nextRun?.formatted(date: .complete, time: .shortened),
+            "last_run": automation.lastRun?.formatted(date: .complete, time: .shortened),
+            "last_error": automation.lastError, "folder": automation.folder,
             "agent": Agent.named(automation.agentID)?.name ?? "Shell", "new_worktree": automation.newWorktree,
         ].compactMapValues { $0 }
     }
