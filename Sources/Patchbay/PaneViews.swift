@@ -199,9 +199,7 @@ private struct PaneHeader: View {
                 .lineLimit(1)
             ElapsedText(since: session.statusSince)
                 .foregroundStyle(.secondary)
-            if let git = session.git {
-                GitBadge(git: git).foregroundStyle(.secondary)
-            }
+            GitBadge(session: session).foregroundStyle(.secondary)
             if let detail = session.detailLine {
                 Text(detail)
                     .foregroundStyle(.secondary)

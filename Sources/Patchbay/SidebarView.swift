@@ -310,9 +310,7 @@ struct SessionRow: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.head)
-                    if let git = session.git {
-                        GitBadge(git: git).foregroundStyle(.secondary)
-                    }
+                    GitBadge(session: session).foregroundStyle(.secondary)
                 }
                 .font(.caption2)
             }

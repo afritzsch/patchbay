@@ -158,7 +158,7 @@ private struct OverviewCard: View {
                 Text(session.abbreviatedCwd)
                     .lineLimit(1)
                     .truncationMode(.head)
-                if let git = session.git { GitBadge(git: git) }
+                GitBadge(session: session)
             }
             .font(.caption)
             .foregroundStyle(.secondary)

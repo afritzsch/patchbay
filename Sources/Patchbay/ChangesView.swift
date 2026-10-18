@@ -50,7 +50,7 @@ struct ChangesView: View {
 
     private func commitBox(_ git: GitInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            GitBadge(git: git).font(.caption).foregroundStyle(.secondary)
+            if let session = store.selectedSession { GitBadge(session: session).font(.caption).foregroundStyle(.secondary) }
             TextField("Message", text: $message, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.roundedBorder)
