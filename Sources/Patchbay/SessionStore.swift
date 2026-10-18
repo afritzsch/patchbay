@@ -286,6 +286,14 @@ final class SessionStore {
     /// The Changes tab is showing: the focused session's git state is refreshed every second.
     @ObservationIgnored var watchingChanges = false
 
+    /// Sessions running an agent in the checkout that contains `directory`. Each worktree is a checkout of its own,
+    /// also one inside the repository's folder, so the deepest checkout counts.
+    func agentSessions(inCheckoutOf directory: String) -> [TerminalSession] {
+        let roots = Set(sessions.compactMap(\.git?.root)).filter { directory == $0 || directory.hasPrefix($0 + "/") }
+        guard let root = roots.max(by: { $0.count < $1.count }) else { return [] }
+        return sessions.filter { $0.agent != nil && $0.git?.root == root }
+    }
+
     /// Opens a file of the focused session's repository in the inspector's editor, changed or not.
     func openInEditor(path: String, line: Int) {
         let change = selectedSession?.git?.changes.first { $0.path == path }

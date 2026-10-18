@@ -25,6 +25,18 @@ struct NewSessionSheet: View {
             if let repo {
                 Section {
                     Toggle("New worktree", isOn: $newWorktree)
+                    let others = store.agentSessions(inCheckoutOf: directory).count
+                    if !newWorktree, agent != nil, others > 0 {
+                        HStack(alignment: .firstTextBaseline) {
+                            Label("\(others == 1 ? "An agent works" : "\(others) agents work") in this checkout already. "
+                                  + "In a new worktree, this one gets its own copy and branch, so they can't change "
+                                  + "each other's files.", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Use Worktree") { newWorktree = true }
+                        }
+                    }
                     if newWorktree {
                         TextField("Branch", text: $branch, prompt: Text(suggestedBranch))
                         if repo.branches.contains(branchName) {

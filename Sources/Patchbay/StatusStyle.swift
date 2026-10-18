@@ -121,15 +121,26 @@ struct ElapsedText: View {
     }
 }
 
-/// "⎇ main ●3 ↑1 ↓2": branch, changed files, commits ahead of and behind the upstream. Font and colour come from the caller.
+/// "⎇ main ●3 ↑1 ↓2": branch, changed files, commits ahead of and behind the upstream. Font and colour come from the
+/// caller, but the branch is orange when other agents work in the same checkout.
 struct GitBadge: View {
-    let git: GitInfo
+    @Environment(SessionStore.self) private var store
+    let session: TerminalSession
 
     var body: some View {
-        HStack(spacing: 4) {
-            Label(git.branch, systemImage: git.isWorktree ? "square.on.square.dashed" : "arrow.triangle.branch")
+        if let git = session.git { badge(git) }
+    }
+
+    private func badge(_ git: GitInfo) -> some View {
+        let others = session.agent == nil ? 0 : store.agentSessions(inCheckoutOf: git.root).count { $0 !== session }
+        let label = Label(git.branch, systemImage: git.isWorktree ? "square.on.square.dashed" : "arrow.triangle.branch")
+        return HStack(spacing: 4) {
+            Group { if others > 0 { label.foregroundStyle(.orange) } else { label } } // else the caller's style
                 .lineLimit(1)
-                .help(git.isWorktree ? "In a worktree: a second checkout of the repository" : "")
+                .help(others > 0 ? "Same checkout as \(others == 1 ? "another agent session" : "\(others) other agent sessions"): "
+                      + "switching branches, stashing or committing in one changes the files of all. "
+                      + "Start agents in a new worktree (⌘N) to keep them apart."
+                      : git.isWorktree ? "In a worktree: a second checkout of the repository" : "")
             if git.changed > 0 { Text("●\(git.changed)").foregroundStyle(.orange) }
             if git.ahead > 0 { Text("↑\(git.ahead)") }
             if git.behind > 0 { Text("↓\(git.behind)") }

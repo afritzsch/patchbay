@@ -18,7 +18,8 @@ with a sidebar that shows what each one is doing.
   go to definition.
 - **Worktrees**: ⌘N can start a session in a new git worktree on its own branch, so several agents can work on one
   repository. A `.patchbay.json` copies gitignored files over and runs a setup command:
-  `{ "copy": [".env"], "setup": "npm install" }`.
+  `{ "copy": [".env"], "setup": "npm install" }`. Agents sharing one checkout have their branch shown in orange,
+  and ⌘N offers a worktree when an agent already works in the folder.
 - **Agents directing agents**: Claude in Patchbay gets MCP tools to start, read, type into and wait for other
   sessions, so one session can split work across others (*"fix these three bugs on separate branches and tell me
   when they're done"*). It can only drive sessions it started, and leaves their permission prompts to you.
