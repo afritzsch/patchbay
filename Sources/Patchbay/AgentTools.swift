@@ -48,7 +48,7 @@ enum AgentTool: String, CaseIterable {
         case .newSession: [
             "folder": ["type": "string", "description": "Absolute path; default your own folder"],
             "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
-            "prompt": ["type": "string", "description": "The agent's first task"],
+            "prompt": ["type": "string", "description": "The agent's first task, or a command for a shell"],
             "name": ["type": "string", "description": "Shown in the sidebar"],
             "branch": ["type": "string"],
             "base": ["type": "string", "description": "Branch a new branch starts at; default the folder's current one"],
@@ -73,7 +73,7 @@ enum AgentTool: String, CaseIterable {
     }
 }
 
-private struct ToolError: Error {
+struct ToolError: Error {
     let message: String
 }
 
@@ -146,33 +146,10 @@ extension SessionStore {
 
     private func startSession(_ args: [String: Any], caller: UUID?) async throws -> TerminalSession {
         let lead = session(caller)
-        var folder = args["folder"] as? String ?? lead?.cwd ?? NSHomeDirectory()
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw ToolError(message: "No folder at \(folder)")
-        }
-        let agentID = args["agent"] as? String ?? Agent.claude.id
-        let agent = Agent.named(agentID)
-        guard agent != nil || agentID == "shell" else { throw ToolError(message: "Unknown agent \(agentID)") }
-        let prompt = args["prompt"] as? String
-        if prompt != nil, agent?.promptStyle ?? .unsupported == .unsupported {
-            throw ToolError(message: "\(agent?.name ?? "A shell") takes no first prompt; use send_input once it runs.")
-        }
-        var setup: String?
-        if let branch = args["branch"] as? String {
-            let start = folder
-            guard let repo = await inBackground({ Git.repository(at: start) }) else {
-                throw ToolError(message: "\(folder) isn't in a git repository")
-            }
-            let base = repo.branches.contains(branch) ? nil : args["base"] as? String ?? repo.current
-            if let error = await inBackground({ repo.addWorktree(branch: branch, base: base) }) {
-                throw ToolError(message: error)
-            }
-            folder = repo.worktreePath(for: branch)
-            setup = repo.setup?.setup
-        }
-        let session = newSession(directory: folder, name: args["name"] as? String, agent: agent, prompt: prompt,
-                                 setup: setup, select: false)
+        let session = try await startSession(folder: args["folder"] as? String ?? lead?.cwd ?? NSHomeDirectory(),
+                                             agentID: args["agent"] as? String ?? Agent.claude.id,
+                                             prompt: args["prompt"] as? String, name: args["name"] as? String,
+                                             branch: args["branch"] as? String, base: args["base"] as? String)
         // The lead's group shows who started it; a lead without one gets a group named after it.
         if let lead {
             session.startedBy = lead.id
@@ -184,6 +161,39 @@ extension SessionStore {
             move(lead.groupID == nil ? [lead.id, session.id] : [session.id], to: group)
         }
         return session
+    }
+
+    /// Opens a session in the background running `agentID` ("shell" for none) with a first prompt, which a shell
+    /// runs as a command. With a branch, it gets its own git worktree on it (an existing branch is checked out,
+    /// a new one starts at `base`, default the folder's current branch). Used by `new_session` and automations.
+    func startSession(folder: String, agentID: String, prompt: String?, name: String?, branch: String?,
+                      base: String?) async throws -> TerminalSession {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw ToolError(message: "No folder at \(folder)")
+        }
+        let agent = Agent.named(agentID)
+        guard agent != nil || agentID == "shell" else { throw ToolError(message: "Unknown agent \(agentID)") }
+        if prompt != nil, let agent, agent.promptStyle == .unsupported {
+            throw ToolError(message: "\(agent.name) takes no first prompt; use send_input once it runs.")
+        }
+        var folder = folder
+        var commands: [String] = []
+        if let branch {
+            let start = folder
+            guard let repo = await inBackground({ Git.repository(at: start) }) else {
+                throw ToolError(message: "\(folder) isn't in a git repository")
+            }
+            let base = repo.branches.contains(branch) ? nil : base ?? repo.current
+            if let error = await inBackground({ repo.addWorktree(branch: branch, base: base) }) {
+                throw ToolError(message: error)
+            }
+            folder = repo.worktreePath(for: branch)
+            commands += [repo.setup?.setup].compactMap { $0 }
+        }
+        if agent == nil, let prompt { commands.append(prompt) }
+        return newSession(directory: folder, name: name, agent: agent, prompt: prompt,
+                          setup: commands.isEmpty ? nil : commands.joined(separator: " && "), select: false)
     }
 
     private func find(_ args: [String: Any]) throws -> TerminalSession {
