@@ -46,13 +46,15 @@ struct Agent: Identifiable, Codable, Hashable {
 
     static let claude = Agent(id: "claude", name: "Claude Code", command: "claude", promptStyle: .argument,
                               approval: ClaudeCode.approval)
-    // Codex's and Gemini's prompts are taken from their documentation, not yet tried in Patchbay.
+    // Codex's, Gemini's and Mistral Vibe's prompts are taken from their documentation or source, not yet tried in Patchbay.
     static let builtIn = [
         claude,
         Agent(id: "codex", name: "Codex", command: "codex", promptStyle: .argument,
               approval: Approval(prompt: "tell Codex what to do differently", allow: "y", deny: "esc")),
         Agent(id: "gemini", name: "Gemini", command: "gemini", promptStyle: .interactiveFlag,
               approval: Approval(prompt: "Allow once", allow: "1", deny: "esc")),
+        Agent(id: "vibe", name: "Mistral Vibe", command: "vibe", promptStyle: .argument,
+              approval: Approval(prompt: "Permission for the", allow: "y", deny: "n")),
     ]
 
     /// Agents added in Settings, stored as JSON in UserDefaults.
