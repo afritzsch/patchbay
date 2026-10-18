@@ -19,7 +19,10 @@ with a sidebar that shows what each one is doing.
 - **Changes**: the *Changes* tab in the sidebar is source control for the focused session's repository: stage,
   unstage, discard (asks first) and commit (⌘↩). Click a file to see its diff beside the panes. Click a line
   number (⇧-click for a range) to comment for the agent; *Send to Agent* types all comments into the session as
-  one message, without pressing Return.
+  one message, without pressing Return. ⌘F searches the diff. *Edit* (or clicking a hunk header) opens the file
+  itself, highlighted, with line numbers; new and changed lines are tinted green and removed ones marked red as you
+  type. ⌘F there opens find and replace; ⌘S saves, and leaving the file saves it too. Without unsaved edits it
+  follows the file on disk, so an agent's changes show up.
 - **Worktrees**: in a git repository, ⌘N can start the session in a new worktree (a second checkout on its own
   branch, in `~/.patchbay/worktrees/<repo>/<branch>`), so several agents can work on one repository without
   getting in each other's way. The branch is named after the session; naming an existing branch checks it out.

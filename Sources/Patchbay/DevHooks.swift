@@ -51,6 +51,13 @@ extension AppDelegate {
             }
             try? lines.joined(separator: "\n").write(to: URL(fileURLWithPath: dir).appending(path: "layout.txt"),
                                                       atomically: true, encoding: .utf8)
+        case "change": // "[staged ]<path>", relative to the repository root
+            let staged = arg.hasPrefix("staged ")
+            let path = staged ? String(arg.dropFirst(7)) : arg
+            guard let change = store.selectedSession?.git?.changes.first(where: { $0.path == path }) else {
+                return print("dev: no change at \(path)")
+            }
+            store.selectedChange = ChangeSelection(path: path, staged: staged, untracked: change.worktree == "?")
         case "type":
             store.selectedSession?.terminal.send(txt: arg)
         case "menu":

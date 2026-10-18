@@ -154,3 +154,43 @@ struct SmallParserTests {
         #expect(ElapsedText.format(7200) == "2h")
     }
 }
+
+struct SyntaxTests {
+    private func tokens(_ text: String, path: String) -> [String] {
+        let string = text as NSString
+        return Syntax(path: path)!.tokens(in: text).map { "\($0.token):\(string.substring(with: $0.range))" }
+    }
+
+    @Test func swift() {
+        #expect(tokens(#"@MainActor let x: Int = 42 // done"#, path: "a.swift")
+            == ["attribute:@MainActor", "keyword:let", "type:Int", "number:42", "comment:// done"])
+        #expect(tokens(#"s = "a \"b\" c" + ""#, path: "a.swift") == [#"string:"a \"b\" c""#, #"string:""#])
+        #expect(tokens("/* one\ntwo */ x", path: "a.swift") == ["comment:/* one\ntwo */"])
+        #expect(tokens("\"\"\"\nmulti\n\"\"\"", path: "a.swift") == ["string:\"\"\"\nmulti\n\"\"\""])
+    }
+
+    @Test func hashComments() {
+        #expect(tokens("echo $# # count", path: "run.sh") == ["comment:# count"])
+        #expect(tokens("def f(): return None", path: "a.py") == ["keyword:def", "keyword:return", "keyword:None"])
+        #expect(Syntax(path: "Makefile") != nil)
+        #expect(Syntax(path: "notes.txt") == nil)
+    }
+
+    @Test func unclosedString() {
+        // Stops at the line end instead of swallowing the rest of the file.
+        #expect(tokens("x = 'it\ny = 1", path: "a.js") == ["string:'it", "number:1"])
+    }
+}
+
+struct LineChangesTests {
+    @Test func addedChangedRemoved() {
+        let old = "a\nb\nc\nd\ne"
+        // b changed, a line after c added, e removed.
+        let changes = Git.lineChanges(from: old, to: "a\nB\nc\nnew\nd")
+        #expect(changes.added == [1, 3])
+        #expect(changes.removed == [5])
+        #expect(Git.lineChanges(from: old, to: "a\nd\ne") == LineChanges(added: [], removed: [1]))
+        #expect(Git.lineChanges(from: "", to: "x\ny") == LineChanges(added: [0, 1], removed: []))
+        #expect(Git.lineChanges(from: "x\r\ny", to: "x\r\ny") == LineChanges())
+    }
+}

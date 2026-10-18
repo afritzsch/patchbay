@@ -88,6 +88,14 @@ struct DiffLine: Identifiable, Equatable {
     var text: String
 }
 
+/// How an edited file differs from git's version, by 0-based line of the edited text.
+struct LineChanges: Equatable {
+    /// Lines that are new or changed.
+    var added: Set<Int> = []
+    /// Lines that removed lines were above (the line count for lines removed at the end).
+    var removed: Set<Int> = []
+}
+
 enum Git {
     /// nil when `directory` isn't in a git repository. Blocking: call off the main thread.
     static func info(at directory: String) -> GitInfo? {
@@ -164,6 +172,38 @@ enum Git {
         // --no-index exits with 1 when the files differ.
         guard let (status, output) = execute(arguments, in: root, timeout: 5, mergeErrors: false), status <= 1 else { return nil }
         return output
+    }
+
+    /// The file as a selection's diff compares it: the index for working-tree changes, HEAD for staged ones.
+    /// Empty when git doesn't have it there (a new file); nil when git couldn't run.
+    static func base(of selection: ChangeSelection, in root: String) -> String? {
+        if selection.untracked { return "" }
+        guard let (status, output) = execute(["show", (selection.staged ? "HEAD:" : ":") + selection.path],
+                                             in: root, timeout: 5, mergeErrors: false) else { return nil }
+        return status == 0 ? output : ""
+    }
+
+    static func lineChanges(from old: String, to new: String) -> LineChanges {
+        // isNewline, like NSString's line ranges in the editor: "\r\n" is one Character.
+        let before = old.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let after = new.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        var changes = LineChanges()
+        var removed = Set<Int>()
+        for change in after.difference(from: before) {
+            switch change {
+            case .insert(let offset, _, _): changes.added.insert(offset)
+            case .remove(let offset, _, _): removed.insert(offset)
+            }
+        }
+        // Walk both texts together to place each removal in the new one.
+        var (i, j) = (0, 0)
+        while i < before.count {
+            if removed.contains(i) { changes.removed.insert(j); i += 1 }
+            else if changes.added.contains(j) { j += 1 }
+            else { (i, j) = (i + 1, j + 1) }
+        }
+        changes.removed.subtract(changes.added) // replaced lines show as changed, not removed
+        return changes
     }
 
     /// Reads `git diff` output for one file: skips the `diff --git` header and numbers the lines of each hunk.
