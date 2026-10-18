@@ -24,6 +24,11 @@ final class SessionStore {
     var groups: [SessionGroup] = [] {
         didSet { save() }
     }
+    /// Sessions started on a schedule (`Automations.swift`).
+    var automations = UserDefaults.standard.data(forKey: Preferences.Keys.automations)
+        .flatMap { try? JSONDecoder().decode([Automation].self, from: $0) } ?? [] {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(automations), forKey: Preferences.Keys.automations) }
+    }
     /// The sessions picked with ⌘- or ⇧-click in the sidebar for a bulk action; empty, never one, otherwise.
     var multiSelection: Set<UUID> = []
     /// The focused session. Selecting a session that isn't on screen puts it in the focused pane.
@@ -173,6 +178,8 @@ final class SessionStore {
             if select {
                 selectedID = session.id
                 if mode == .history { mode = .panes }
+            } else if selectedID == nil { // Nothing on screen to keep: show it rather than an empty window.
+                selectedID = session.id
             }
             record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
         }
@@ -468,6 +475,7 @@ final class SessionStore {
             if session.unseen, session.isVisible() { session.markSeen() }
         }
         if watchingChanges { selectedSession?.gitStale = true }
+        runDueAutomations()
         save() // Directories and Claude session IDs change as the sessions run; unchanged state isn't written.
     }
 

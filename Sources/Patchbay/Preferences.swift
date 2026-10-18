@@ -19,6 +19,7 @@ enum Preferences {
         /// Whether the new-session sheet starts sessions in a git repository in a new worktree.
         static let newWorktree = "newWorktree"
         static let customAgents = "customAgents"
+        static let automations = "automations"
         /// Whether Claude in the app's terminals gets Patchbay's MCP tools.
         static let agentTools = "agentTools"
         static let historyRetentionDays = "historyRetentionDays"

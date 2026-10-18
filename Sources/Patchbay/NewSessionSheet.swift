@@ -19,14 +19,7 @@ struct NewSessionSheet: View {
     var body: some View {
         Form {
             Section {
-                HStack {
-                    Picker("Folder", selection: $directory) {
-                        ForEach(directoryChoices, id: \.self) { dir in
-                            Text((dir as NSString).abbreviatingWithTildeInPath).tag(dir)
-                        }
-                    }
-                    Button("Choose…", action: chooseDirectory)
-                }
+                FolderPicker(directory: $directory)
                 TextField("Name", text: $name, prompt: Text((directory as NSString).lastPathComponent))
             }
             if let repo {
@@ -127,6 +120,24 @@ struct NewSessionSheet: View {
         if let copy = setup.copy, !copy.isEmpty { parts.append("copies " + copy.joined(separator: ", ")) }
         if let command = setup.setup { parts.append("runs " + command) }
         return parts.joined(separator: "; ")
+    }
+
+}
+
+/// One of the recent folders, or any other picked with Choose….
+struct FolderPicker: View {
+    @Environment(SessionStore.self) private var store
+    @Binding var directory: String
+
+    var body: some View {
+        HStack {
+            Picker("Folder", selection: $directory) {
+                ForEach(directoryChoices, id: \.self) { dir in
+                    Text((dir as NSString).abbreviatingWithTildeInPath).tag(dir)
+                }
+            }
+            Button("Choose…", action: chooseDirectory)
+        }
     }
 
     private var directoryChoices: [String] {

@@ -63,6 +63,12 @@ with a sidebar that shows what each one is doing.
   starts join its sidebar group (a group named after it if it had none) and don't take your focus. It can type
   into and close only the sessions it started, and leaves their permission prompts to you. Looking around
   needs no permission; starting, typing and closing ask, as Claude's tools do. Off in Settings.
+- **Automations**: the *Automations* tab in the sidebar starts a session on a schedule (hourly, daily, on weekdays
+  or weekly): an agent with a prompt, such as *"review yesterday's commits"*, or a shell running a command, in a
+  folder or in a new worktree for each run. Each automation's runs collect in a sidebar group named after it, and
+  notify you like any session when they finish or need you. A run is skipped while the last one is still busy.
+  Automations run only while Patchbay is open; a run missed while it was closed or the Mac slept starts once it's
+  back. Right-click one to run it now, edit it or show its last run.
 - **Restore**: on relaunch the pane layout, folders and Claude conversations come back. Both can be turned off
   in Settings (⌘,).
 
