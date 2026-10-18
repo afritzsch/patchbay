@@ -119,8 +119,11 @@ struct AutomationSheet: View {
                     Text("Shell").tag("shell")
                     ForEach(Agent.all.filter { $0.promptStyle != .unsupported }) { Text($0.name).tag($0.id) }
                 }
-                TextField(automation.agentID == "shell" ? "Command" : "Prompt", text: $automation.prompt, axis: .vertical)
-                    .lineLimit(2...6)
+            }
+            if let agent = Agent.named(automation.agentID) {
+                PromptField(title: "First prompt", placeholder: "What should \(agent.name) do?", text: $automation.prompt)
+            } else {
+                PromptField(title: "Command", placeholder: "What should the shell run?", text: $automation.prompt)
             }
             Section {
                 Picker("Repeat", selection: $automation.frequency) {
