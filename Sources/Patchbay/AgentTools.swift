@@ -66,7 +66,7 @@ enum AgentTool: String, CaseIterable {
             "prompt": ["type": "string", "description": "The agent's first task, or a command for a shell"],
             "name": ["type": "string", "description": "Shown in the sidebar"],
             "branch": ["type": "string"],
-            "base": ["type": "string", "description": "Branch a new branch starts at; default the folder's current one"],
+            "base": ["type": "string", "description": "Branch a new branch starts at; default main (or master), else the folder's current one"],
         ]
         case .sendInput: ["session": session, "text": ["type": "string"], "submit": ["type": "boolean"]]
         case .waitFor: ["session": session, "timeout": ["type": "integer", "description": "Seconds (default 300)"]]
@@ -205,7 +205,7 @@ extension SessionStore {
 
     /// Opens a session in the background running `agentID` ("shell" for none) with a first prompt, which a shell
     /// runs as a command. With a branch, it gets its own git worktree on it (an existing branch is checked out,
-    /// a new one starts at `base`, default the folder's current branch). Used by `new_session` and automations.
+    /// a new one starts at `base`, default `repo.defaultBase`). Used by `new_session` and automations.
     func startSession(folder: String, agentID: String, prompt: String?, name: String?, branch: String?,
                       base: String?) async throws -> TerminalSession {
         let agent = try checkStart(folder: folder, agentID: agentID, prompt: prompt)
@@ -216,7 +216,7 @@ extension SessionStore {
             guard let repo = await inBackground({ Git.repository(at: start) }) else {
                 throw ToolError(message: "\(folder) isn't in a git repository")
             }
-            let base = repo.branches.contains(branch) ? nil : base ?? repo.current
+            let base = repo.branches.contains(branch) ? nil : base ?? repo.defaultBase
             if let error = await inBackground({ repo.addWorktree(branch: branch, base: base) }) {
                 throw ToolError(message: error)
             }

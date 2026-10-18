@@ -25,6 +25,8 @@ struct GitRepo: Sendable {
     var branches: [String]
     /// From `.patchbay.json` in the main checkout.
     var setup: WorktreeSetup?
+    /// What a new worktree starts from unless picked otherwise: main (or master), else the current branch.
+    var defaultBase: String? { ["main", "master"].first(where: branches.contains) ?? current ?? branches.first }
 
     func worktreePath(for branch: String) -> String {
         "\(Git.worktreesFolder)/\((root as NSString).lastPathComponent)/\(branch)"

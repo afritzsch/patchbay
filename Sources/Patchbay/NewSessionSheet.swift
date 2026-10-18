@@ -90,7 +90,7 @@ struct NewSessionSheet: View {
         .task(id: directory) {
             let directory = directory
             repo = await inBackground { Git.repository(at: directory) }
-            base = repo?.current ?? repo?.branches.first ?? ""
+            base = repo?.defaultBase ?? ""
         }
     }
 
