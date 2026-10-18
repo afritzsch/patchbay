@@ -6,6 +6,8 @@ struct ChangesView: View {
     @State private var message = ""
     @State private var error: String?
     @State private var discarding: GitChange?
+    /// Local branches of the focused session's repository, for the branch menu.
+    @State private var branches: [String] = []
 
     private var changes: [GitChange] { store.selectedSession?.git?.changes ?? [] }
     private var staged: [GitChange] { changes.filter(\.isStaged) }
@@ -50,7 +52,28 @@ struct ChangesView: View {
 
     private func commitBox(_ git: GitInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let session = store.selectedSession { GitBadge(session: session).font(.caption).foregroundStyle(.secondary) }
+            Menu {
+                ForEach(branches, id: \.self) { branch in
+                    Button(branch) { Task { await apply { Git.switchBranch(to: branch, in: git.root) } } }
+                        .disabled(branch == git.branch)
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    if let session = store.selectedSession { GitBadge(session: session) }
+                    Image(systemName: "chevron.down").imageScale(.small)
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help("Switch branch")
+            // Reloaded when the branch changes, so one made in the terminal shows up after a switch.
+            .task(id: git.root + git.branch) {
+                let root = git.root
+                branches = await inBackground { Git.repository(at: root)?.branches ?? [] }
+            }
             TextField("Message", text: $message, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.roundedBorder)
