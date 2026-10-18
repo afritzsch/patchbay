@@ -52,7 +52,7 @@ enum ShellIntegration {
             ($0.rawValue, [["hooks": [["type": "command", "command": "\(command) \($0.rawValue)", "timeout": 5]]]])
         })
         // The tools that only look don't ask for permission.
-        let readOnly = [AgentTool.listSessions, .readOutput, .waitFor].map { "mcp__patchbay__\($0.rawValue)" }
+        let readOnly = [AgentTool.listSessions, .readOutput, .waitFor, .listAutomations].map { "mcp__patchbay__\($0.rawValue)" }
         let settings = try JSONSerialization.data(withJSONObject: ["hooks": hooks, "permissions": ["allow": readOnly]],
                                                   options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try settings.write(to: claudeSettings, options: .atomic)
