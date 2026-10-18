@@ -255,6 +255,11 @@ enum Git {
         perform(["commit", "-m", message], in: root, timeout: 60)
     }
 
+    /// Fails when uncommitted changes would be overwritten or another worktree has the branch checked out.
+    static func switchBranch(to branch: String, in root: String) -> String? {
+        perform(["switch", branch], in: root, timeout: 30)
+    }
+
     /// Deletes a worktree with its uncommitted changes, then its branch unless that has unmerged commits.
     static func removeWorktree(_ path: String) -> String? {
         guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)
