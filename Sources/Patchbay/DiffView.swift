@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The diff of the file selected in the Changes tab, shown as an inspector next to the panes.
-/// Clicking a line number starts a comment for the agent; the comments collect in a tray below.
+/// The diff of the file selected in the Changes tab, shown as an inspector next to the panes, or the file itself
+/// to edit. Clicking a line number starts a comment for the agent; the comments collect in a tray below.
 struct DiffView: View {
     @Environment(SessionStore.self) private var store
     let selection: ChangeSelection
@@ -10,25 +10,37 @@ struct DiffView: View {
     @State private var commenting: ClosedRange<Int>?
     @State private var draft = ""
     @FocusState private var draftFocused: Bool
+    @State private var editing = false
+    /// Where the editor opens: the first change, or the hunk clicked.
+    @State private var editLine: Int?
+    @State private var searching = false
+    @State private var query = ""
+    /// Which of the matches is shown.
+    @State private var match = 0
+    @State private var findRequest = 0
+    @FocusState private var queryFocused: Bool
     private let maxLines = 5000
 
     private var name: String { (selection.path as NSString).lastPathComponent }
     private var folder: String { (selection.path as NSString).deletingLastPathComponent }
+    private var syntax: Syntax? { Syntax(path: selection.path) }
+    /// The ids of the lines containing the search text.
+    private var matches: [Int] {
+        guard searching, !query.isEmpty else { return [] }
+        return lines.filter { $0.kind != .hunk && $0.text.localizedCaseInsensitiveContains(query) }.map(\.id)
+    }
+    private var currentMatch: Int? { matches.isEmpty ? nil : matches[min(match, matches.count - 1)] }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(lines.prefix(maxLines)) { line in
-                        row(line)
-                        if line.id == commenting?.upperBound { editor }
-                    }
-                }
-            }
-            .overlay {
-                if lines.isEmpty { ContentUnavailableView("No Differences", systemImage: "checkmark.circle") }
+            if editing, let root = store.selectedSession?.git?.root {
+                FileEditorView(selection: selection, root: root, line: editLine, findRequest: findRequest)
+                    .id(selection.path)
+            } else {
+                if searching { searchBar }
+                diff
             }
             if let session = store.selectedSession, !session.reviewComments.isEmpty {
                 Divider()
@@ -42,10 +54,77 @@ struct DiffView: View {
                 if let root = store.selectedSession?.git?.root {
                     let diff = await inBackground { Git.diff(of: selection, in: root) } ?? ""
                     let fresh = Git.parseDiff(diff)
-                    if fresh != lines { lines = fresh }
+                    if fresh != lines {
+                        if lines.isEmpty { editLine = fresh.first { $0.kind != .hunk }?.new }
+                        lines = fresh
+                    }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
+        }
+    }
+
+    private var diff: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines.prefix(maxLines)) { line in
+                        row(line)
+                        if line.id == commenting?.upperBound { editor }
+                    }
+                }
+            }
+            .onChange(of: currentMatch) {
+                if let currentMatch { proxy.scrollTo(currentMatch, anchor: .center) }
+            }
+        }
+        .overlay {
+            if lines.isEmpty { ContentUnavailableView("No Differences", systemImage: "checkmark.circle") }
+        }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Find in diff", text: $query)
+                .textFieldStyle(.plain)
+                .focused($queryFocused)
+                .onAppear { queryFocused = true }
+                .onSubmit { step(NSEvent.modifierFlags.contains(.shift) ? -1 : 1) }
+                .onExitCommand { searching = false }
+                .onChange(of: query) { match = 0 }
+            if !query.isEmpty {
+                Text(matches.isEmpty ? "No matches" : "\(min(match, matches.count - 1) + 1) of \(matches.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Button { step(-1) } label: { Image(systemName: "chevron.up") }
+                .help("Previous match (⇧↩)")
+            Button { step(1) } label: { Image(systemName: "chevron.down") }
+                .help("Next match (↩)")
+            Button { searching = false } label: { Image(systemName: "xmark.circle.fill") }
+                .foregroundStyle(.secondary)
+                .help("Close the search (Esc)")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func step(_ by: Int) {
+        guard !matches.isEmpty else { return }
+        match = (min(match, matches.count - 1) + by + matches.count) % matches.count
+    }
+
+    /// ⌘F: the search above the diff, or the editor's find bar.
+    private func find() {
+        if editing {
+            findRequest += 1
+        } else {
+            searching = true
+            queryFocused = true
         }
     }
 
@@ -55,6 +134,20 @@ struct DiffView: View {
             Text(folder).font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
             Text(selection.staged ? "Staged" : "Working Tree").font(.caption).foregroundStyle(.secondary)
             Spacer(minLength: 4)
+            Picker("Mode", selection: $editing) {
+                Text("Diff").tag(false)
+                Text("Edit").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Show the diff, or edit the file in the working tree")
+            Button(action: find) {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("f")
+            .help("Find (⌘F)")
             Text("+\(lines.count { $0.kind == .added })").foregroundStyle(.green)
             Text("−\(lines.count { $0.kind == .removed })").foregroundStyle(.red)
             Button {
@@ -79,6 +172,12 @@ struct DiffView: View {
                 .padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.blue.opacity(0.12))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    editLine = lines.first { $0.id > line.id }?.new
+                    editing = true
+                }
+                .help("Edit the file from here")
         } else {
             HStack(alignment: .top, spacing: 0) {
                 HStack(spacing: 0) {
@@ -89,7 +188,9 @@ struct DiffView: View {
                 .onTapGesture { select(line.id) }
                 .help("Comment on this line, ⇧-click for several")
                 Text(marker(of: line.kind)).foregroundStyle(.secondary).frame(width: 18)
-                Text(line.text.isEmpty ? " " : line.text)
+                Text(marked(line.text.isEmpty || line.kind == .note ? AttributedString(line.text + " ")
+                            : syntax?.highlighted(line.text) ?? AttributedString(line.text),
+                            text: line.text, current: line.id == currentMatch))
                     .italic(line.kind == .note)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,6 +265,21 @@ struct DiffView: View {
         session.reviewComments.append(ReviewComment(path: selection.path, lines: lines[range], text: draft))
         draft = ""
         commenting = nil
+    }
+
+    /// `string` with the search text marked in it, more strongly on the current match.
+    private func marked(_ string: AttributedString, text: String, current: Bool) -> AttributedString {
+        guard searching, !query.isEmpty else { return string }
+        var string = string
+        var start = text.startIndex
+        while let found = text.range(of: query, options: .caseInsensitive, range: start..<text.endIndex) {
+            if let range = Range(NSRange(found, in: text), in: string) {
+                string[range].backgroundColor = current ? .orange : .yellow
+                string[range].foregroundColor = .black
+            }
+            start = found.upperBound
+        }
+        return string
     }
 
     private func gutter(_ number: Int?) -> some View {

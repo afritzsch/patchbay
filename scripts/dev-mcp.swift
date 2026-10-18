@@ -36,6 +36,7 @@ enum Tool: String, CaseIterable {
     case clickMenu = "click_menu"
     case dropSession = "drop_session"
     case layout
+    case openChange = "open_change"
     case logs
     case stopTestApp = "stop_test_app"
 
@@ -58,6 +59,10 @@ enum Tool: String, CaseIterable {
             Returns the pane tree, sessions numbered as in the sidebar: H[…] is a row, V[…] a column, each child \
             followed by its share, e.g. H[1:0.50 V[2:0.50 3:0.50]:0.50]. Then each terminal's frame in window points.
             """
+        case .openChange: """
+            Opens the diff inspector for a changed file of the selected session, as clicking it in the Changes tab \
+            would. The path is relative to the repository root.
+            """
         case .logs: "Returns the end of the test copy's stdout and stderr (print and NSLog output)."
         case .stopTestApp: "Quits the test copy and deletes it, its support folder and its defaults, so the next start is fresh."
         }
@@ -69,6 +74,7 @@ enum Tool: String, CaseIterable {
         case .clickMenu: ["title": ["type": "string"]]
         case .dropSession: ["session": ["type": "integer"], "target": ["type": "integer"],
                             "zone": ["type": "string", "enum": ["left", "right", "top", "bottom", "center"]]]
+        case .openChange: ["path": ["type": "string"], "staged": ["type": "boolean"]]
         case .logs: ["lines": ["type": "integer", "description": "How many lines (default 50)"]]
         default: [:]
         }
@@ -76,7 +82,7 @@ enum Tool: String, CaseIterable {
 
     var schema: [String: Any] {
         ["name": rawValue, "description": description,
-         "inputSchema": ["type": "object", "properties": parameters, "required": self == .logs ? [] : Array(parameters.keys)]]
+         "inputSchema": ["type": "object", "properties": parameters, "required": self == .logs ? [] : self == .openChange ? ["path"] : Array(parameters.keys)]]
     }
 }
 
@@ -119,6 +125,9 @@ func call(_ tool: Tool, _ args: [String: Any]) throws -> [[String: Any]] {
         return [text(try requestLayout())]
     case .layout:
         return [text(try requestLayout())]
+    case .openChange:
+        try post("change", (args["staged"] as? Bool == true ? "staged " : "") + (args["path"] as? String ?? ""))
+        return [text("Opened, unless `logs` says otherwise.")]
     case .logs:
         let log = (try? String(contentsOf: logFile, encoding: .utf8)) ?? ""
         return [text(log.split(separator: "\n").suffix(args["lines"] as? Int ?? 50).joined(separator: "\n"))]
