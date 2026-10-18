@@ -38,6 +38,14 @@ enum PaneLayout: Codable, Equatable {
 
     func contains(_ id: UUID) -> Bool { sessionIDs.contains(id) }
 
+    /// The session's id for a pane, the split's own for a split.
+    var nodeID: UUID {
+        switch self {
+        case .pane(let id): id
+        case .split(let id, _, _, _): id
+        }
+    }
+
     /// Rows of equal panes, about as many rows as columns: 4 sessions make 2 × 2, 5 make 3 over 2.
     static func grid(_ ids: [UUID]) -> PaneLayout {
         let columns = Int(Double(ids.count).squareRoot().rounded(.up))

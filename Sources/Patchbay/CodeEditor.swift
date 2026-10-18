@@ -548,14 +548,13 @@ private final class LineNumberRuler: NSRulerView {
         clientView = textView
         ruleThickness = 44
         // Scrolling doesn't redraw a ruler by itself.
-        NotificationCenter.default.addObserver(self, selector: #selector(redraw), name: NSView.boundsDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(redraw), name: NSView.boundsDidChangeNotification,
+                                               object: textView.enclosingScrollView?.contentView)
     }
 
     required init(coder: NSCoder) { fatalError() }
 
-    @objc private func redraw(_ notification: Notification) {
-        if (notification.object as? NSView) == scrollView?.contentView { needsDisplay = true }
-    }
+    @objc private func redraw() { needsDisplay = true }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = clientView as? CodeTextView, let layout = textView.layoutManager else { return }

@@ -31,6 +31,7 @@ struct Automation: Codable, Identifiable, Hashable {
     var lastError: String?
 
     var title: String { name.isEmpty ? prompt : name }
+    var agentName: String { Agent.named(agentID)?.name ?? "Shell" }
 
     /// The first time after `date` that the schedule matches.
     func nextRun(after date: Date, calendar: Calendar = .current) -> Date? {
@@ -94,9 +95,8 @@ extension SessionStore {
         let time = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: started)
         let stamp = String(format: "%04d%02d%02d-%02d%02d", time.year ?? 0, time.month ?? 0, time.day ?? 0,
                            time.hour ?? 0, time.minute ?? 0)
-        let branch = automation.newWorktree
-            ? Git.branchName(for: automation.name.isEmpty ? "automation" : automation.name) + "-" + stamp
-            : nil
+        let slug = Git.branchName(for: automation.name) // empty for a name like "🌙"; a branch can't start with "-"
+        let branch = automation.newWorktree ? (slug.isEmpty ? "automation" : slug) + "-" + stamp : nil
         Task {
             do {
                 let session = try await startSession(folder: automation.folder, agentID: automation.agentID,

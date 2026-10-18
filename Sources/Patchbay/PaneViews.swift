@@ -26,15 +26,6 @@ extension SessionStore {
     }
 }
 
-extension PaneLayout {
-    var nodeID: UUID {
-        switch self {
-        case .pane(let id): id
-        case .split(let id, _, _, _): id
-        }
-    }
-}
-
 /// Renders a layout tree: a pane or a split of further nodes.
 struct LayoutNodeView: View {
     @Environment(SessionStore.self) private var store

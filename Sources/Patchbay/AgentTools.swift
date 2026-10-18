@@ -307,7 +307,7 @@ extension SessionStore {
             "next_run": automation.nextRun?.formatted(date: .complete, time: .shortened),
             "last_run": automation.lastRun?.formatted(date: .complete, time: .shortened),
             "last_error": automation.lastError, "folder": automation.folder,
-            "agent": Agent.named(automation.agentID)?.name ?? "Shell", "new_worktree": automation.newWorktree,
+            "agent": automation.agentName, "new_worktree": automation.newWorktree,
         ].compactMapValues { $0 }
     }
 
