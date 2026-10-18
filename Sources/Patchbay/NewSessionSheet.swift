@@ -52,13 +52,7 @@ struct NewSessionSheet: View {
                 }
             }
             if let agent, agent.promptStyle != .unsupported {
-                Section("First prompt") {
-                    TextField("First prompt", text: $prompt, prompt: Text("What should \(agent.name) do? (optional)"),
-                              axis: .vertical)
-                        .labelsHidden()
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(4...12)
-                }
+                PromptField(title: "First prompt", placeholder: "What should \(agent.name) do? (optional)", text: $prompt)
             }
         }
         .formStyle(.grouped)
@@ -122,6 +116,22 @@ struct NewSessionSheet: View {
         return parts.joined(separator: "; ")
     }
 
+}
+
+/// A form section with a multi-line box for an agent's first prompt, shared by the new session and automation sheets.
+struct PromptField: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        Section(title) {
+            TextField(title, text: $text, prompt: Text(placeholder), axis: .vertical)
+                .labelsHidden()
+                .multilineTextAlignment(.leading)
+                .lineLimit(4...12)
+        }
+    }
 }
 
 /// One of the recent folders, or any other picked with Choose….
