@@ -23,6 +23,9 @@ enum Preferences {
         /// Whether Claude in the app's terminals gets Patchbay's MCP tools.
         static let agentTools = "agentTools"
         static let historyRetentionDays = "historyRetentionDays"
+        /// Whether the editor starts language servers for errors, completion and go to definition.
+        static let languageServers = "languageServers"
+        static let customLanguageServers = "customLanguageServers"
     }
 
     static let defaultFontSize: CGFloat = 13
@@ -36,7 +39,7 @@ enum Preferences {
             defaults.removeObject(forKey: "startClaude")
         }
         defaults.register(defaults: [
-            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.agentTools: true, Keys.startAgent: Agent.claude.id,
+            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.agentTools: true, Keys.languageServers: true, Keys.startAgent: Agent.claude.id,
             Keys.fontSize: defaultFontSize, Keys.historyRetentionDays: 90,
         ])
     }

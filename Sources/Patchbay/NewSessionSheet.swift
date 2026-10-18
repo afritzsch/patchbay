@@ -164,8 +164,10 @@ struct SettingsView: View {
     @AppStorage(Preferences.Keys.resumeClaude) private var resumeClaude = true
     @AppStorage(Preferences.Keys.notify) private var notify = true
     @AppStorage(Preferences.Keys.agentTools) private var agentTools = true
+    @AppStorage(Preferences.Keys.languageServers) private var languageServers = true
     @Environment(SessionStore.self) private var store
     @State private var customAgents = Agent.custom
+    @State private var customServers = LanguageServerConfig.custom
 
     var body: some View {
         @Bindable var store = store
@@ -215,6 +217,36 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Section("Language servers") {
+                Toggle("Show errors, completions and definitions in the editor", isOn: $languageServers)
+                ForEach(LanguageServerConfig.builtIn) { server in
+                    LabeledContent(server.name) {
+                        Text(server.command).font(.callout.monospaced()).foregroundStyle(.secondary)
+                    }
+                }
+                ForEach($customServers) { $server in
+                    HStack {
+                        TextField("Name", text: $server.name)
+                        TextField("Command", text: $server.command)
+                        TextField("Extensions", text: Binding {
+                            server.extensions.joined(separator: " ")
+                        } set: {
+                            server.extensions = $0.split { $0 == " " || $0 == "," }.map { $0.trimmingCharacters(in: ["."]) }
+                        })
+                        Button("Remove", systemImage: "minus.circle") { customServers.removeAll { $0.id == server.id } }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                    }
+                }
+                Button("Add Language Server") {
+                    customServers.append(LanguageServerConfig(id: UUID().uuidString, name: "", command: "", extensions: []))
+                }
+                Text("A server starts when you edit a file of its language, in that file's repository, with your "
+                     + "login shell's PATH; install the ones you need. Servers added here (extensions like "
+                     + "\"py pyi\") come before the built-in ones.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             LabeledContent("Claude hooks") {
                 Text("Loaded with --settings in this app's terminals; your ~/.claude settings are untouched.")
                     .foregroundStyle(.secondary)
@@ -225,5 +257,6 @@ struct SettingsView: View {
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: customAgents) { Agent.custom = customAgents }
+        .onChange(of: customServers) { LanguageServerConfig.custom = customServers }
     }
 }
