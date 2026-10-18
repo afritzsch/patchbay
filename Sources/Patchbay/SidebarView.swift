@@ -14,15 +14,15 @@ struct SidebarView: View {
         Group {
             switch tab {
             case .sessions: sessionList
-            case .changes: ChangesView()
             case .automations: AutomationsView()
+            case .changes: ChangesView()
             }
         }
         .safeAreaInset(edge: .top) {
             Picker("", selection: $tab) {
                 Text("Sessions").tag(Tab.sessions)
-                Text(changeCount > 0 ? "Changes \(changeCount)" : "Changes").tag(Tab.changes)
                 Text("Automations").tag(Tab.automations)
+                Text(changeCount > 0 ? "Changes \(changeCount)" : "Changes").tag(Tab.changes)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
