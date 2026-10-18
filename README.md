@@ -59,10 +59,12 @@ with a sidebar that shows what each one is doing.
 - **Agents directing agents**: Claude in Patchbay's terminals gets Patchbay's own MCP tools, so you can ask one
   session to split work across others: *"start three Claude sessions on branches fix-a, fix-b and fix-c, give
   each one of these bugs, and tell me when they're done"*. The tools list sessions, read their output, start
-  agents (optionally in a new worktree), type into them, wait until they're done and close them. Sessions it
+  agents (optionally in a new worktree), type into them, wait until they're done and close them, and create
+  automations (*"review my open PRs every weekday at 9"*). Sessions it
   starts join its sidebar group (a group named after it if it had none) and don't take your focus. It can type
   into and close only the sessions it started, and leaves their permission prompts to you. Looking around
-  needs no permission; starting, typing and closing ask, as Claude's tools do. Off in Settings.
+  needs no permission; starting, typing, closing and creating automations ask, as Claude's tools do. Off in
+  Settings.
 - **Automations**: the *Automations* tab in the sidebar starts a session on a schedule (hourly, daily, on weekdays
   or weekly): an agent with a prompt, such as *"review yesterday's commits"*, or a shell running a command, in a
   folder or in a new worktree for each run. Each automation's runs collect in a sidebar group named after it, and

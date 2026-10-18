@@ -10,6 +10,9 @@ enum AgentTool: String, CaseIterable {
     case sendInput = "send_input"
     case waitFor = "wait_for"
     case closeSession = "close_session"
+    case createAutomation = "create_automation"
+
+    static let weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
     static let instructions = """
         Patchbay is the terminal app you run in. Its sidebar lists sessions: terminals, often with a coding agent \
@@ -17,7 +20,8 @@ enum AgentTool: String, CaseIterable {
         which the user sees next to you. Use them when the user wants work split across agents: start each agent \
         with new_session (with a branch, so it works in its own git worktree), wait_for it, read_output to see what \
         it did, send_input to follow up. You can type into and close only the sessions you started. When one asks \
-        for permission, leave that to the user.
+        for permission, leave that to the user. For work the user wants done regularly, such as a daily review, \
+        create_automation has Patchbay start a session on a schedule.
         """
 
     var description: String {
@@ -37,6 +41,12 @@ enum AgentTool: String, CaseIterable {
             at the prompt. Returns the session; its status says which, or that it is still working after the timeout.
             """
         case .closeSession: "Closes a session you started. Its worktree, if any, is kept."
+        case .createAutomation: """
+            Schedules a session that Patchbay starts regularly, as new_session would: an agent with a prompt, or a \
+            shell running a command, optionally in a new git worktree for each run. It runs only while Patchbay is \
+            open; a run missed while it was closed starts once it's back. The user sees, edits and deletes it in the \
+            sidebar's Automations tab. Returns it with its next run.
+            """
         }
     }
 
@@ -56,6 +66,16 @@ enum AgentTool: String, CaseIterable {
         case .sendInput: ["session": session, "text": ["type": "string"], "submit": ["type": "boolean"]]
         case .waitFor: ["session": session, "timeout": ["type": "integer", "description": "Seconds (default 300)"]]
         case .closeSession: ["session": session]
+        case .createAutomation: [
+            "folder": ["type": "string", "description": "Absolute path; default your own folder"],
+            "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
+            "prompt": ["type": "string", "description": "The agent's task each run, or a command for a shell"],
+            "name": ["type": "string", "description": "Shown in the sidebar"],
+            "repeat": ["type": "string", "enum": Automation.Frequency.allCases.map(\.rawValue)],
+            "time": ["type": "string", "description": "HH:MM, 24-hour, local time (default 09:00); hourly uses only the minutes"],
+            "weekday": ["type": "string", "enum": Self.weekdays, "description": "For weekly (default monday)"],
+            "new_worktree": ["type": "boolean", "description": "Each run in its own new worktree (default false)"],
+        ]
         }
     }
 
@@ -64,6 +84,7 @@ enum AgentTool: String, CaseIterable {
         case .listSessions, .newSession: []
         case .readOutput, .waitFor, .closeSession: ["session"]
         case .sendInput: ["session", "text"]
+        case .createAutomation: ["prompt", "repeat"]
         }
     }
 
@@ -141,6 +162,8 @@ extension SessionStore {
         case .closeSession:
             close(try find(args, startedBy: caller))
             return "Closed."
+        case .createAutomation:
+            return try json(describe(try await createAutomation(args, caller: caller)))
         }
     }
 
@@ -168,15 +191,7 @@ extension SessionStore {
     /// a new one starts at `base`, default the folder's current branch). Used by `new_session` and automations.
     func startSession(folder: String, agentID: String, prompt: String?, name: String?, branch: String?,
                       base: String?) async throws -> TerminalSession {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw ToolError(message: "No folder at \(folder)")
-        }
-        let agent = Agent.named(agentID)
-        guard agent != nil || agentID == "shell" else { throw ToolError(message: "Unknown agent \(agentID)") }
-        if prompt != nil, let agent, agent.promptStyle == .unsupported {
-            throw ToolError(message: "\(agent.name) takes no first prompt; use send_input once it runs.")
-        }
+        let agent = try checkStart(folder: folder, agentID: agentID, prompt: prompt)
         var folder = folder
         var commands: [String] = []
         if let branch {
@@ -194,6 +209,53 @@ extension SessionStore {
         if agent == nil, let prompt { commands.append(prompt) }
         return newSession(directory: folder, name: name, agent: agent, prompt: prompt,
                           setup: commands.isEmpty ? nil : commands.joined(separator: " && "), select: false)
+    }
+
+    /// The agent `agentID` names (nil for a shell), if it can be started in `folder` with `prompt`.
+    private func checkStart(folder: String, agentID: String, prompt: String?) throws -> Agent? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw ToolError(message: "No folder at \(folder)")
+        }
+        let agent = Agent.named(agentID)
+        guard agent != nil || agentID == "shell" else { throw ToolError(message: "Unknown agent \(agentID)") }
+        if prompt != nil, let agent, agent.promptStyle == .unsupported {
+            throw ToolError(message: "\(agent.name) takes no first prompt; use send_input once it runs.")
+        }
+        return agent
+    }
+
+    private func createAutomation(_ args: [String: Any], caller: UUID?) async throws -> Automation {
+        var automation = Automation(name: args["name"] as? String ?? "",
+                                    folder: args["folder"] as? String ?? session(caller)?.cwd ?? NSHomeDirectory(),
+                                    agentID: args["agent"] as? String ?? Agent.claude.id,
+                                    prompt: args["prompt"] as? String ?? "",
+                                    newWorktree: args["new_worktree"] as? Bool ?? false)
+        _ = try checkStart(folder: automation.folder, agentID: automation.agentID, prompt: automation.prompt)
+        let folder = automation.folder
+        if automation.newWorktree, await inBackground({ Git.repository(at: folder) }) == nil {
+            throw ToolError(message: "\(folder) isn't in a git repository, so it can't have worktrees")
+        }
+        guard let frequency = Automation.Frequency(rawValue: args["repeat"] as? String ?? "") else {
+            throw ToolError(message: "repeat must be hourly, daily, weekdays or weekly")
+        }
+        automation.frequency = frequency
+        if let time = args["time"] as? String {
+            let parts = time.split(separator: ":").compactMap { Int($0) }
+            guard parts.count == 2, (0..<24).contains(parts[0]), (0..<60).contains(parts[1]) else {
+                throw ToolError(message: "time must be HH:MM, such as 09:30")
+            }
+            automation.hour = parts[0]
+            automation.minute = parts[1]
+        }
+        if let day = args["weekday"] as? String {
+            guard let index = AgentTool.weekdays.firstIndex(of: day.lowercased()) else {
+                throw ToolError(message: "Unknown weekday \(day)")
+            }
+            automation.weekday = index + 1
+        }
+        saveAutomation(automation)
+        return automations.first { $0.id == automation.id } ?? automation
     }
 
     private func find(_ args: [String: Any]) throws -> TerminalSession {
@@ -218,6 +280,14 @@ extension SessionStore {
             "status": session.statusLabel, "detail": session.detailLine, "folder": session.cwd,
             "branch": session.git?.branch, "you": session.id == caller ? true : nil,
             "started_by_you": caller != nil && session.startedBy == caller ? true : nil,
+        ].compactMapValues { $0 }
+    }
+
+    private func describe(_ automation: Automation) -> [String: Any] {
+        [
+            "id": automation.id.uuidString, "name": automation.title, "schedule": automation.schedule,
+            "next_run": automation.nextRun?.formatted(date: .complete, time: .shortened), "folder": automation.folder,
+            "agent": Agent.named(automation.agentID)?.name ?? "Shell", "new_worktree": automation.newWorktree,
         ].compactMapValues { $0 }
     }
 
