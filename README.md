@@ -1,6 +1,6 @@
 # Patchbay
 
-A Mac app for running several Claude Code sessions (and Codex, Gemini, other agents and plain shells) side by side,
+A Mac app for running several Claude Code sessions (and Codex, Gemini, Mistral Vibe, other agents and plain shells) side by side,
 with a sidebar that shows what each one is doing.
 
 ![Patchbay with three Claude Code sessions (working, waiting for permission, done) and a dev server](docs/screenshot.png)

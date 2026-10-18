@@ -43,6 +43,7 @@ struct GitParserTests {
         #expect(Agent.claude.commandLine(arguments: ["--resume", "abc"], prompt: "it's done?")
                 == #"claude '--resume' 'abc' 'it'\''s done?'"#)
         #expect(Agent.named("gemini")?.commandLine(prompt: "hi") == "gemini -i 'hi'")
+        #expect(Agent.named("vibe")?.commandLine(prompt: "hi") == "vibe 'hi'")
         #expect(Agent(id: "x", name: "X", command: "x").commandLine(prompt: "ignored") == "x")
     }
 

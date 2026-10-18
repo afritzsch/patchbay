@@ -233,7 +233,7 @@ struct SettingsView: View {
                     }
                 }
                 Button("Add Agent") { customAgents.append(Agent(id: UUID().uuidString, name: "", command: "")) }
-                Text("Codex and Gemini are built in. Any command added here shows as working while it runs. "
+                Text("Codex, Gemini and Mistral Vibe are built in. Any command added here shows as working while it runs. "
                      + "With text from its permission prompt, Patchbay sees it asking and can answer with the keys "
                      + "given (esc and enter stand for those keys).")
                     .foregroundStyle(.secondary)
