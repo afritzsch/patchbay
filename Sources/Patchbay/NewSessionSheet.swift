@@ -96,8 +96,15 @@ struct NewSessionSheet: View {
             }
         }
         .onAppear {
-            directory = store.newSessionFolder ?? store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
+            let folder = store.newSessionFolder ?? store.selectedSession?.cwd ?? store.recentDirectories.first ?? NSHomeDirectory()
+            directory = folder
             store.newSessionFolder = nil
+            // Not in another session's worktree: start in its repository's main checkout.
+            if folder.hasPrefix(Git.worktreesFolder + "/") {
+                Task {
+                    if let root = await inBackground({ Git.repository(at: folder)?.root }), directory == folder { directory = root }
+                }
+            }
         }
         .task(id: directory) {
             let directory = directory
