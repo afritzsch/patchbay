@@ -18,6 +18,9 @@ enum Preferences {
         static let startAgent = "startAgent"
         /// Whether the new-session sheet starts sessions in a git repository in a new worktree.
         static let newWorktree = "newWorktree"
+        /// Claude's `--model` and `--effort` in the new-session sheet; empty for Claude's own default.
+        static let claudeModel = "claudeModel"
+        static let claudeEffort = "claudeEffort"
         static let customAgents = "customAgents"
         static let automations = "automations"
         /// Whether Claude in the app's terminals gets Patchbay's MCP tools.

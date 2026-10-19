@@ -8,6 +8,8 @@ struct NewSessionSheet: View {
     @State private var name = ""
     @State private var prompt = ""
     @AppStorage(Preferences.Keys.newWorktree) private var newWorktree = false
+    @AppStorage(Preferences.Keys.claudeModel) private var model = ""
+    @AppStorage(Preferences.Keys.claudeEffort) private var effort = ""
     /// The folder's repository; nil outside one.
     @State private var repo: GitRepo?
     @State private var branch = ""
@@ -61,6 +63,16 @@ struct NewSessionSheet: View {
                 Picker("Start", selection: $startAgent) {
                     Text("Shell").tag("shell")
                     ForEach(Agent.all) { Text($0.name).tag($0.id) }
+                }
+                if agent == .claude {
+                    Picker("Model", selection: $model) {
+                        Text("Default").tag("")
+                        ForEach(ClaudeCode.models, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    Picker("Effort", selection: $effort) {
+                        Text("Default").tag("")
+                        ForEach(ClaudeCode.efforts, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
                 }
             }
             if let agent, agent.promptStyle != .unsupported {
@@ -116,7 +128,9 @@ struct NewSessionSheet: View {
     }
 
     private func open(_ folder: String, setup: String? = nil) {
-        store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt, setup: setup)
+        let options = agent == .claude ? [("--model", model), ("--effort", effort)].filter { !$0.1.isEmpty } : []
+        store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt, setup: setup,
+                         claudeArgs: options.flatMap { [$0.0, $0.1] })
         dismiss()
     }
 
