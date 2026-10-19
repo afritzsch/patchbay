@@ -3,17 +3,17 @@ import SwiftUI
 /// The sidebar's Automations tab: sessions started on a schedule.
 struct AutomationsView: View {
     @Environment(SessionStore.self) private var store
-    @State private var editing: Automation?
 
     var body: some View {
+        @Bindable var store = store
         List {
             ForEach(store.automations) { automation in
                 AutomationRow(automation: automation)
                     .contentShape(.rect)
-                    .onTapGesture(count: 2) { editing = automation }
+                    .onTapGesture(count: 2) { store.editingAutomation = automation }
                     .contextMenu {
                         Button("Run Now") { store.run(automation) }
-                        Button("Edit…") { editing = automation }
+                        Button("Edit…") { store.editingAutomation = automation }
                         if let id = automation.lastSessionID, store.session(id) != nil {
                             Button("Show Last Run") { store.show(id) }
                         }
@@ -33,7 +33,7 @@ struct AutomationsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Divider()
                 Button {
-                    editing = Automation(folder: store.selectedSession?.cwd ?? NSHomeDirectory())
+                    store.newAutomation()
                 } label: {
                     Label("New Automation", systemImage: "plus")
                 }
@@ -42,7 +42,7 @@ struct AutomationsView: View {
             .padding(10)
             .background(.bar)
         }
-        .sheet(item: $editing) { AutomationSheet(automation: $0) }
+        .sheet(item: $store.editingAutomation) { AutomationSheet(automation: $0) }
     }
 }
 

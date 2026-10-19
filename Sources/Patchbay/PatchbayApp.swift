@@ -26,8 +26,11 @@ private struct AppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session…") { store.showNewSessionSheet = true }
-                .keyboardShortcut("n")
+            // One item that checks the tab when it fires: SwiftUI updates the menu late.
+            Button(store.sidebarTab == .automations ? "New Automation…" : "New Session…") {
+                if store.sidebarTab == .automations { store.newAutomation() } else { store.showNewSessionSheet = true }
+            }
+            .keyboardShortcut("n")
             Button("New Shell Here") { store.newShellHere() }
                 .keyboardShortcut("t")
             Divider()
