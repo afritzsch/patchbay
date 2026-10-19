@@ -154,6 +154,14 @@ struct SmallParserTests {
         #expect(ElapsedText.format(150) == "2m")
         #expect(ElapsedText.format(7200) == "2h")
     }
+
+    @Test func usageFromIdleSessionsIsIgnored() {
+        let window = { (percent: Double, hour: Double) in UsageWindow(usedPercent: percent, resetsAt: Date(timeIntervalSince1970: hour * 3600)) }
+        #expect(UsageWindow.latest(window(40, 5), window(30, 5)) == window(40, 5))
+        #expect(UsageWindow.latest(window(40, 5), window(80, 0)) == window(40, 5))
+        #expect(UsageWindow.latest(window(40, 5), window(2, 10)) == window(2, 10))
+        #expect(UsageWindow.latest(nil, window(2, 10)) == window(2, 10))
+    }
 }
 
 struct SyntaxTests {
