@@ -5,6 +5,10 @@ enum MainMode {
     case panes, overview, history
 }
 
+enum SidebarTab {
+    case sessions, changes, automations
+}
+
 enum DragPayload: Equatable {
     case session(UUID)
     case external(ExternalSession)
@@ -84,6 +88,9 @@ final class SessionStore {
     var overviewRowFractions = UserDefaults.standard.array(forKey: Preferences.Keys.overviewRowFractions) as? [Double] ?? [] {
         didSet { UserDefaults.standard.set(overviewRowFractions, forKey: Preferences.Keys.overviewRowFractions) }
     }
+    var sidebarTab = SidebarTab.sessions
+    /// The automation open in the automation sheet.
+    var editingAutomation: Automation?
     var showNewSessionSheet = false
     /// The folder the new-session sheet starts with, instead of the focused session's.
     var newSessionFolder: String?

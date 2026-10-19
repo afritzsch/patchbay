@@ -59,6 +59,11 @@ struct Automation: Codable, Identifiable, Hashable {
 }
 
 extension SessionStore {
+    /// Opens the automation sheet for a new one in the focused session's folder.
+    func newAutomation() {
+        editingAutomation = Automation(folder: selectedSession?.cwd ?? NSHomeDirectory())
+    }
+
     /// Adds or replaces an automation, scheduling its next run from now.
     func saveAutomation(_ automation: Automation) {
         var automation = automation
