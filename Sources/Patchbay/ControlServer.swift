@@ -2,7 +2,8 @@ import Foundation
 
 /// A Unix domain socket in the support folder for agents in the app's terminals. Their MCP server is
 /// `patchbay-mcp.sh`, which relays the agent's stdin and stdout to it with `nc`: the first line is the session the
-/// agent runs in, then JSON-RPC messages, one per line each way. The messages are answered by `handle`.
+/// agent runs in, then JSON-RPC messages, one per line each way. The messages are answered by `handle`. Other apps
+/// connect the same way with an empty first line to send `patchbay/open`.
 @MainActor
 final class ControlServer {
     private let handle: (Data, _ caller: UUID?) async -> Data?

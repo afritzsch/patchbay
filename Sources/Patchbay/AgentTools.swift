@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Patchbay's MCP tools for the agents in its terminals (served by `ControlServer`): a lead agent can start other
 /// agents, give them tasks and follow them, while the user sees and controls them all in the sidebar. Any session
@@ -106,6 +106,25 @@ struct ToolError: Error {
     let message: String
 }
 
+/// `patchbay/open` from another app on the Mac: a Claude session in `folder` that resumes a conversation, starts
+/// with a prompt, or neither.
+struct OpenRequest {
+    let folder: String
+    let resume: String?
+    let prompt: String?
+    let name: String?
+
+    init(_ params: [String: Any]) throws {
+        guard let folder = params["folder"] as? String else { throw ToolError(message: "folder is required") }
+        resume = params["resume"] as? String
+        prompt = params["prompt"] as? String
+        name = params["name"] as? String
+        guard resume == nil || prompt == nil else { throw ToolError(message: "Pass resume or prompt, not both") }
+        _ = try SessionStore.checkStart(folder: folder, agentID: Agent.claude.id, prompt: prompt)
+        self.folder = folder
+    }
+}
+
 extension SessionStore {
     /// Answers one JSON-RPC message from an agent's MCP server; nil for notifications, which get no reply.
     func handleMCP(_ line: Data, caller: UUID?) async -> Data? {
@@ -133,6 +152,12 @@ extension SessionStore {
                 isError = true
             }
             reply["result"] = ["content": [["type": "text", "text": content]], "isError": isError]
+        case "patchbay/open": // From other apps, not an agent tool.
+            do {
+                reply["result"] = ["session": try open(OpenRequest(params)).id.uuidString]
+            } catch {
+                reply["error"] = ["code": -32602, "message": (error as? ToolError)?.message ?? "\(error)"]
+            }
         case "ping":
             reply["result"] = [String: Any]()
         default:
@@ -184,6 +209,21 @@ extension SessionStore {
         }
     }
 
+    /// Opens the session another app asked for, focused and in front. A conversation already open here is focused.
+    private func open(_ request: OpenRequest) throws -> TerminalSession {
+        let open = request.resume.flatMap { id in sessions.first { $0.isClaude && $0.claudeSessionID == id } }
+        if let id = request.resume, open == nil {
+            guard !isRunning(claudeConversation: id) else { throw ToolError(message: "\(id) is open in another terminal") }
+            guard ClaudeTranscripts.exist(for: id) else { throw ToolError(message: "No Claude conversation \(id)") }
+        }
+        let session = open ?? newSession(directory: request.folder, name: request.name, agent: .claude,
+                                         prompt: request.prompt, resumeClaudeID: request.resume)
+        show(session.id)
+        NSApp.activate()
+        AppDelegate.shared?.mainWindow?.makeKeyAndOrderFront(nil)
+        return session
+    }
+
     private func startSession(_ args: [String: Any], caller: UUID?) async throws -> TerminalSession {
         let lead = session(caller)
         let session = try await startSession(folder: args["folder"] as? String ?? lead?.cwd ?? NSHomeDirectory(),
@@ -208,7 +248,7 @@ extension SessionStore {
     /// a new one starts at `base`, default `repo.defaultBase`). Used by `new_session` and automations.
     func startSession(folder: String, agentID: String, prompt: String?, name: String?, branch: String?,
                       base: String?) async throws -> TerminalSession {
-        let agent = try checkStart(folder: folder, agentID: agentID, prompt: prompt)
+        let agent = try Self.checkStart(folder: folder, agentID: agentID, prompt: prompt)
         var folder = folder
         var commands: [String] = []
         if let branch {
@@ -229,7 +269,7 @@ extension SessionStore {
     }
 
     /// The agent `agentID` names (nil for a shell), if it can be started in `folder` with `prompt`.
-    private func checkStart(folder: String, agentID: String, prompt: String?) throws -> Agent? {
+    nonisolated static func checkStart(folder: String, agentID: String, prompt: String?) throws -> Agent? {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw ToolError(message: "No folder at \(folder)")
@@ -248,7 +288,7 @@ extension SessionStore {
                                     agentID: args["agent"] as? String ?? Agent.claude.id,
                                     prompt: args["prompt"] as? String ?? "",
                                     newWorktree: args["new_worktree"] as? Bool ?? false)
-        _ = try checkStart(folder: automation.folder, agentID: automation.agentID, prompt: automation.prompt)
+        _ = try Self.checkStart(folder: automation.folder, agentID: automation.agentID, prompt: automation.prompt)
         let folder = automation.folder
         if automation.newWorktree, await inBackground({ Git.repository(at: folder) }) == nil {
             throw ToolError(message: "\(folder) isn't in a git repository, so it can't have worktrees")

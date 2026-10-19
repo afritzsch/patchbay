@@ -57,6 +57,30 @@ Requires macOS 15+ and Xcode (Swift 6).
 | ⇧⌘O / ⇧⌘H | Overview / history |
 | ⌘R | Rename session |
 
+## Opening sessions from other apps
+
+A running Patchbay opens a Claude Code session in front when another app (a review tool's *Continue in Claude
+Code*, say) asks on its control socket, `~/Library/Application Support/Patchbay/control.sock` (only your user can
+connect). Send an empty line, then one JSON-RPC line that resumes a conversation:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"patchbay/open","params":{"folder":"/abs/path","resume":"<claude session id>","name":"D5402 review"}}
+```
+
+or starts a new one with a first prompt (leave out both `resume` and `prompt` for a fresh session):
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"patchbay/open","params":{"folder":"/abs/path","prompt":"/some-command arg","name":"…"}}
+```
+
+The reply is `{"result":{"session":"<uuid>"}}`, or an error with a message. From a shell:
+
+```sh
+{ echo; echo '{"jsonrpc":"2.0","id":1,"method":"patchbay/open","params":{"folder":"'"$PWD"'"}}'; } | nc -U ~/Library/Application\ Support/Patchbay/control.sock
+```
+
+When Patchbay isn't running, start it first (`open -b app.patchbay.Patchbay`) and wait for the socket.
+
 ## How status tracking works
 
 Nothing in your own config is modified. Each session's zsh loads your startup files through a `ZDOTDIR` wrapper
