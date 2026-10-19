@@ -4,6 +4,14 @@ import SwiftUI
 struct UsageWindow: Equatable {
     let usedPercent: Double
     let resetsAt: Date
+
+    /// Every Claude session writes the numbers it last got, so an idle one writes older ones: an earlier window,
+    /// or less of the same one. Usage within a window only grows.
+    static func latest(_ old: UsageWindow?, _ new: UsageWindow?) -> UsageWindow? {
+        guard let old, let new else { return new ?? old }
+        if new.resetsAt != old.resetsAt { return new.resetsAt > old.resetsAt ? new : old }
+        return new.usedPercent >= old.usedPercent ? new : old
+    }
 }
 
 /// Claude plan usage (5-hour and weekly limits), read from the `usage.json` the status line script writes
@@ -27,8 +35,8 @@ final class UsageMonitor {
               let data = try? Data(contentsOf: Self.file),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         updatedAt = modified
-        fiveHour = Self.window(json["five_hour"])
-        sevenDay = Self.window(json["seven_day"])
+        fiveHour = .latest(fiveHour, Self.window(json["five_hour"]))
+        sevenDay = .latest(sevenDay, Self.window(json["seven_day"]))
     }
 
     private static func window(_ value: Any?) -> UsageWindow? {
