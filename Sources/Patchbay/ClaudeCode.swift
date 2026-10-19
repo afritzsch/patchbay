@@ -23,6 +23,10 @@ enum ClaudeCode {
     static let carriedValueOptions: Set<String> = ["--model", "--permission-mode", "--add-dir", "--effort", "--agent", "--fallback-model"]
     static let carriedFlagOptions: Set<String> = ["--dangerously-skip-permissions", "--verbose", "--ide"]
 
+    /// What the new-session sheet offers for `--model` (aliases for the latest models) and `--effort`.
+    static let models = ["fable", "opus", "sonnet", "haiku"]
+    static let efforts = ["low", "medium", "high", "xhigh", "max"]
+
     /// The terminal title before Claude has a task to name it after.
     static let untitled = "Claude Code"
 
