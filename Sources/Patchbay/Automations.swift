@@ -14,6 +14,9 @@ struct Automation: Codable, Identifiable, Hashable {
     var agentID = Agent.claude.id
     /// The agent's first prompt, or the shell's command.
     var prompt = ""
+    /// Claude's `--model` and `--effort`; nil for its own default.
+    var model: String?
+    var effort: String?
     /// Each run gets its own worktree, on a branch named after the automation and the time.
     var newWorktree = false
     var frequency = Frequency.weekdays
@@ -106,7 +109,8 @@ extension SessionStore {
             do {
                 let session = try await startSession(folder: automation.folder, agentID: automation.agentID,
                                                      prompt: automation.prompt, name: automation.name.isEmpty ? nil : automation.name,
-                                                     branch: branch, base: nil)
+                                                     branch: branch, base: nil,
+                                                     claudeArgs: ClaudeCode.arguments(model: automation.model, effort: automation.effort))
                 // The group has the automation's id, so later runs find it again after the user renames it.
                 if !groups.contains(where: { $0.id == automation.id }) {
                     groups.append(SessionGroup(id: automation.id, name: automation.title))

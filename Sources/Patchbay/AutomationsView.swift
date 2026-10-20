@@ -68,7 +68,7 @@ struct AutomationRow: View {
                         .foregroundStyle(.red)
                 }
                 HStack(spacing: 6) {
-                    AgentBadge(name: automation.agentName)
+                    AgentBadge(name: [automation.agentName, automation.model, automation.effort].compactMap { $0 }.joined(separator: " · "))
                     Text((automation.folder as NSString).abbreviatingWithTildeInPath)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -114,6 +114,14 @@ struct AutomationSheet: View {
                     Text("Shell").tag("shell")
                     ForEach(Agent.all.filter { $0.promptStyle != .unsupported }) { Text($0.name).tag($0.id) }
                 }
+                if automation.agentID == Agent.claude.id {
+                    ClaudeOptions(model: Binding { automation.model ?? "" } set: { automation.model = $0.isEmpty ? nil : $0 },
+                                  effort: Binding { automation.effort ?? "" } set: { automation.effort = $0.isEmpty ? nil : $0 })
+                }
+            }
+            .onChange(of: automation.agentID) {
+                automation.model = nil
+                automation.effort = nil
             }
             if let agent = Agent.named(automation.agentID) {
                 PromptField(title: "First prompt", placeholder: "What should \(agent.name) do?", text: $automation.prompt)

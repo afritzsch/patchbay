@@ -65,14 +65,7 @@ struct NewSessionSheet: View {
                     ForEach(Agent.all) { Text($0.name).tag($0.id) }
                 }
                 if agent == .claude {
-                    Picker("Model", selection: $model) {
-                        Text("Default").tag("")
-                        ForEach(ClaudeCode.models, id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                    Picker("Effort", selection: $effort) {
-                        Text("Default").tag("")
-                        ForEach(ClaudeCode.efforts, id: \.self) { Text($0.capitalized).tag($0) }
-                    }
+                    ClaudeOptions(model: $model, effort: $effort)
                 }
             }
             if let agent, agent.promptStyle != .unsupported {
@@ -135,9 +128,8 @@ struct NewSessionSheet: View {
     }
 
     private func open(_ folder: String, setup: String? = nil) {
-        let options = agent == .claude ? [("--model", model), ("--effort", effort)].filter { !$0.1.isEmpty } : []
         store.newSession(directory: folder, name: name.isEmpty ? nil : name, agent: agent, prompt: prompt, setup: setup,
-                         claudeArgs: options.flatMap { [$0.0, $0.1] })
+                         claudeArgs: agent == .claude ? ClaudeCode.arguments(model: model, effort: effort) : [])
         dismiss()
     }
 
@@ -149,6 +141,23 @@ struct NewSessionSheet: View {
         return parts.joined(separator: "; ")
     }
 
+}
+
+/// Pickers for Claude's `--model` and `--effort`, shared by the new session and automation sheets; "" is Claude's default.
+struct ClaudeOptions: View {
+    @Binding var model: String
+    @Binding var effort: String
+
+    var body: some View {
+        Picker("Model", selection: $model) {
+            Text("Default").tag("")
+            ForEach(ClaudeCode.models, id: \.self) { Text($0.capitalized).tag($0) }
+        }
+        Picker("Effort", selection: $effort) {
+            Text("Default").tag("")
+            ForEach(ClaudeCode.efforts, id: \.self) { Text($0.capitalized).tag($0) }
+        }
+    }
 }
 
 /// A form section with a multi-line box for an agent's first prompt, shared by the new session and automation sheets.

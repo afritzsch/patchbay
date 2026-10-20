@@ -77,6 +77,8 @@ enum AgentTool: String, CaseIterable {
             "folder": ["type": "string", "description": "Absolute path; default your own folder"],
             "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
             "prompt": ["type": "string", "description": "The agent's task each run, or a command for a shell"],
+            "model": ["type": "string", "enum": ClaudeCode.models, "description": "Claude's model (default Claude's own)"],
+            "effort": ["type": "string", "enum": ClaudeCode.efforts, "description": "Claude's effort (default Claude's own)"],
             "name": ["type": "string", "description": "Shown in the sidebar"],
             "repeat": ["type": "string", "enum": Automation.Frequency.allCases.map(\.rawValue)],
             "time": ["type": "string", "description": "HH:MM, 24-hour, local time (default 09:00); hourly uses only the minutes"],
@@ -247,7 +249,7 @@ extension SessionStore {
     /// runs as a command. With a branch, it gets its own git worktree on it (an existing branch is checked out,
     /// a new one starts at `base`, default `repo.defaultBase`). Used by `new_session` and automations.
     func startSession(folder: String, agentID: String, prompt: String?, name: String?, branch: String?,
-                      base: String?) async throws -> TerminalSession {
+                      base: String?, claudeArgs: [String] = []) async throws -> TerminalSession {
         let agent = try Self.checkStart(folder: folder, agentID: agentID, prompt: prompt)
         var folder = folder
         var commands: [String] = []
@@ -265,7 +267,8 @@ extension SessionStore {
         }
         if agent == nil, let prompt { commands.append(prompt) }
         return newSession(directory: folder, name: name, agent: agent, prompt: prompt,
-                          setup: commands.isEmpty ? nil : commands.joined(separator: " && "), select: false)
+                          setup: commands.isEmpty ? nil : commands.joined(separator: " && "),
+                          claudeArgs: agent == .claude ? claudeArgs : [], select: false)
     }
 
     /// The agent `agentID` names (nil for a shell), if it can be started in `folder` with `prompt`.
@@ -287,8 +290,18 @@ extension SessionStore {
                                     folder: args["folder"] as? String ?? session(caller)?.cwd ?? NSHomeDirectory(),
                                     agentID: args["agent"] as? String ?? Agent.claude.id,
                                     prompt: args["prompt"] as? String ?? "",
+                                    model: args["model"] as? String, effort: args["effort"] as? String,
                                     newWorktree: args["new_worktree"] as? Bool ?? false)
-        _ = try Self.checkStart(folder: automation.folder, agentID: automation.agentID, prompt: automation.prompt)
+        let agent = try Self.checkStart(folder: automation.folder, agentID: automation.agentID, prompt: automation.prompt)
+        if agent != .claude, automation.model != nil || automation.effort != nil {
+            throw ToolError(message: "Only claude takes a model and effort")
+        }
+        if let model = automation.model, !ClaudeCode.models.contains(model) {
+            throw ToolError(message: "model must be one of " + ClaudeCode.models.joined(separator: ", "))
+        }
+        if let effort = automation.effort, !ClaudeCode.efforts.contains(effort) {
+            throw ToolError(message: "effort must be one of " + ClaudeCode.efforts.joined(separator: ", "))
+        }
         let folder = automation.folder
         if automation.newWorktree, await inBackground({ Git.repository(at: folder) }) == nil {
             throw ToolError(message: "\(folder) isn't in a git repository, so it can't have worktrees")
@@ -347,7 +360,8 @@ extension SessionStore {
             "next_run": automation.nextRun?.formatted(date: .complete, time: .shortened),
             "last_run": automation.lastRun?.formatted(date: .complete, time: .shortened),
             "last_error": automation.lastError, "folder": automation.folder,
-            "agent": automation.agentName, "new_worktree": automation.newWorktree,
+            "agent": automation.agentName, "model": automation.model, "effort": automation.effort,
+            "new_worktree": automation.newWorktree,
         ].compactMapValues { $0 }
     }
 

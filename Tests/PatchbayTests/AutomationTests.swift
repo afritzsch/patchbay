@@ -34,4 +34,9 @@ struct AutomationTests {
     @Test func weekly() {
         #expect(automation(.weekly, weekday: 4).nextRun(after: date(16, 10), calendar: calendar) == date(21, 9))
     }
+
+    @Test func claudeArguments() {
+        #expect(ClaudeCode.arguments(model: "opus", effort: "max") == ["--model", "opus", "--effort", "max"])
+        #expect(ClaudeCode.arguments(model: "", effort: nil) == [])
+    }
 }
