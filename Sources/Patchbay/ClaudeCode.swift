@@ -27,6 +27,13 @@ enum ClaudeCode {
     static let models = ["fable", "opus", "sonnet", "haiku"]
     static let efforts = ["low", "medium", "high", "xhigh", "max"]
 
+    /// `--model` and `--effort` for the ones chosen; nil or empty keeps Claude's own default.
+    static func arguments(model: String?, effort: String?) -> [String] {
+        [("--model", model), ("--effort", effort)].flatMap { option, value in
+            value.map { $0.isEmpty ? [] : [option, $0] } ?? []
+        }
+    }
+
     /// The terminal title before Claude has a task to name it after.
     static let untitled = "Claude Code"
 
