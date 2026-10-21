@@ -179,9 +179,10 @@ struct GroupMenu: View {
 
     var body: some View {
         let sessions = store.sessions.filter { $0.groupID == group.id }
+        let pinned = group.id == SessionGroup.pinnedID
         Button("Open as Panes") { store.showAsPanes(sessions.map(\.id)) }
-        Button("Rename Group…") { store.renamingID = group.id }
-        Button("Ungroup") { store.move(sessions.map(\.id), to: nil) }
+        if !pinned { Button("Rename Group…") { store.renamingID = group.id } }
+        Button(pinned ? "Unpin All" : "Ungroup") { store.move(sessions.map(\.id), to: nil) }
         Divider()
         Button("Close \(sessions.count) Sessions", role: .destructive) { store.confirmAndClose(sessions) }
     }
@@ -216,6 +217,7 @@ struct SessionMenu: View {
             Button("Open in Panes") { store.show(session.id) }
         }
         Button("Rename…") { store.renamingID = session.id }
+        Button(session.groupID == SessionGroup.pinnedID ? "Unpin" : "Pin") { store.togglePin(session) }
         Button("Show History") { store.showHistory(for: session) }
         MoveToGroupMenu(ids: [session.id])
         if let focused = store.selectedID, focused != session.id, store.layout != nil {
