@@ -11,6 +11,8 @@ struct GitInfo: Equatable {
     var changes: [GitChange]
     /// A second checkout (`git worktree add`), not the repository's main one.
     var isWorktree = false
+    /// The main checkout's folder name, which its worktrees share.
+    var repoName = ""
     var changed: Int { changes.count }
     /// A worktree this app made, which it may offer to delete.
     var isOwnWorktree: Bool { root.hasPrefix(Git.worktreesFolder + "/") }
@@ -109,6 +111,9 @@ enum Git {
         else { return nil }
         var info = parse(status: status, root: String(paths[0]))
         info.isWorktree = paths[1] != paths[2]
+        // A worktree's shared git dir is the main checkout's `.git`.
+        let main = info.isWorktree ? (String(paths[2]) as NSString).deletingLastPathComponent : info.root
+        info.repoName = (main as NSString).lastPathComponent
         return info
     }
 

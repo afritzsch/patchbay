@@ -299,10 +299,11 @@ struct SessionRow: View {
                 }
                 HStack(spacing: 6) {
                     if let agent = session.agent { AgentBadge(name: agent.name) }
-                    Text(session.abbreviatedCwd)
+                    Text(session.location)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                        .truncationMode(.head)
+                        .truncationMode(.tail)
+                        .help(session.abbreviatedCwd)
                     GitBadge(session: session).foregroundStyle(.secondary)
                 }
                 .font(.caption2)

@@ -155,9 +155,10 @@ private struct OverviewCard: View {
                 .help("Open in the panes")
             }
             HStack(spacing: 8) {
-                Text(session.abbreviatedCwd)
+                Text(session.location)
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    .truncationMode(.tail)
+                    .help(session.abbreviatedCwd)
                 GitBadge(session: session)
             }
             .font(.caption)
