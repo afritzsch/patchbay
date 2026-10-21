@@ -12,6 +12,7 @@ enum SidebarTab {
 enum DragPayload: Equatable {
     case session(UUID)
     case external(ExternalSession)
+    case group(UUID)
 }
 
 /// A named section of the sidebar. Its sessions are kept together in `SessionStore.sessions`.
@@ -430,6 +431,14 @@ final class SessionStore {
         sessions.insert(contentsOf: moving, at: anchor.flatMap { anchor in sessions.firstIndex { $0 === anchor } } ?? sessions.count)
         tidyGroups()
         multiSelection = []
+        save()
+    }
+
+    /// Moves a group to `offset` in `groups`, counted before it is taken out.
+    func moveGroup(_ id: UUID, to offset: Int) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups.move(fromOffsets: [index], toOffset: offset)
+        tidyGroups()
         save()
     }
 
