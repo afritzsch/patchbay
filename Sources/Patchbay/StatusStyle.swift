@@ -70,6 +70,12 @@ extension TerminalSession {
     var abbreviatedCwd: String {
         (state.cwd as NSString).abbreviatingWithTildeInPath
     }
+
+    /// The repository and the folder in it, "patchbay/Sources", else the path. A worktree's path says little.
+    var location: String {
+        guard let git else { return abbreviatedCwd }
+        return git.repoName + (state.cwd.hasPrefix(git.root + "/") ? String(state.cwd.dropFirst(git.root.count)) : "")
+    }
 }
 
 struct StatusIcon: View {
