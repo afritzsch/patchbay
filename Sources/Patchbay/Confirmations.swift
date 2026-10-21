@@ -101,6 +101,9 @@ extension SessionStore {
         case .external(let external):
             // After the drop has finished, so the question isn't asked mid-drop.
             DispatchQueue.main.async { self.confirmAndBringIn(external, splitting: nil, zone: .right) }
+        case .group(let id):
+            // Above a group's first session goes before that group, elsewhere in it after; ungrouped, last.
+            moveGroup(id, to: groups.firstIndex { $0.id == group }.map { index == 0 ? $0 : $0 + 1 } ?? groups.count)
         case nil:
             break
         }
