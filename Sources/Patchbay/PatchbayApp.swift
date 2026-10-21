@@ -77,6 +77,9 @@ private struct AppCommands: Commands {
             Button("Rename…") { store.renamingID = store.selectedID }
                 .keyboardShortcut("r")
                 .disabled(store.selectedSession == nil)
+            Button(store.selectedSession?.groupID == SessionGroup.pinnedID ? "Unpin" : "Pin") {
+                store.selectedSession.map(store.togglePin)
+            }
             Divider()
             ForEach(0..<9, id: \.self) { index in
                 Button("Session \(index + 1)") { store.select(index: index) }

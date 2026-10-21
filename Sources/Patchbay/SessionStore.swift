@@ -16,6 +16,8 @@ enum DragPayload: Equatable {
 
 /// A named section of the sidebar. Its sessions are kept together in `SessionStore.sessions`.
 struct SessionGroup: Codable, Identifiable {
+    /// The Pinned group's, which is kept above the others.
+    static let pinnedID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     var id = UUID()
     var name: String
     var isExpanded = true
@@ -419,6 +421,15 @@ final class SessionStore {
         groups.append(group)
         move(ids, to: group.id)
         renamingID = group.id
+    }
+
+    /// Moves a session into the Pinned group, or out of it into Ungrouped.
+    func togglePin(_ session: TerminalSession) {
+        guard session.groupID != SessionGroup.pinnedID else { return move([session.id], to: nil) }
+        if groups.first?.id != SessionGroup.pinnedID {
+            groups.insert(SessionGroup(id: SessionGroup.pinnedID, name: "Pinned"), at: 0)
+        }
+        move([session.id], to: SessionGroup.pinnedID)
     }
 
     /// Moves sessions into a group (nil: out of their groups), before the group's `index`-th session or at its end.
