@@ -37,8 +37,18 @@ enum Preferences {
     /// Must run before the store is made, whose properties read their saved values as they are initialized.
     static func register() {
         UserDefaults.standard.register(defaults: [
-            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.agentTools: true, Keys.languageServers: true, Keys.startAgent: Agent.claude.id,
-            Keys.fontSize: defaultFontSize, Keys.historyRetentionDays: 90,
+            Keys.restoreSessions: true, Keys.resumeClaude: true, Keys.notify: true, Keys.agentTools: true,
+            Keys.languageServers: true, Keys.startAgent: Agent.claude.id, Keys.fontSize: defaultFontSize,
+            Keys.historyRetentionDays: 90,
         ])
+    }
+
+    /// A value saved as JSON with `save`; nil when there is none or it doesn't decode.
+    static func load<T: Decodable>(_ type: T.Type, forKey key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    static func save(_ value: some Encodable, forKey key: String) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: key)
     }
 }

@@ -217,8 +217,9 @@ enum Git {
     /// Reads `git diff` output for one file: skips the `diff --git` header and numbers the lines of each hunk.
     /// Output without hunks (binary files, mode changes) comes back as notes.
     static func parseDiff(_ diff: String) -> [DiffLine] {
-        // Not split(separator: "\n"): a String keeps "\r\n" as one Character, so CRLF files wouldn't split.
-        let all = diff.split(whereSeparator: \.isNewline)
+        // A String keeps "\r\n" as one Character, so CRLF files need it too. Not isNewline: git separates lines with
+        // "\n" only, and a lone "\r" or U+2028 inside a line would split it.
+        let all = diff.split { $0 == "\n" || $0 == "\r\n" }
         guard let start = all.firstIndex(where: { $0.hasPrefix("@@") }) else {
             return all.enumerated().map { DiffLine(id: $0, kind: .note, text: String($1)) }
         }

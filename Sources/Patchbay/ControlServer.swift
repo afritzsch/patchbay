@@ -72,9 +72,7 @@ final class ControlServer {
             return
         }
         connection.buffer += data
-        while let newline = connection.buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = connection.buffer[connection.buffer.startIndex..<newline]
-            connection.buffer.removeSubrange(connection.buffer.startIndex...newline)
+        for line in connection.buffer.takeLines() {
             guard connection.introduced else {
                 connection.introduced = true
                 connection.caller = UUID(uuidString: String(decoding: line, as: UTF8.self))

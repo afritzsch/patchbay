@@ -57,14 +57,15 @@ enum AgentTool: String, CaseIterable {
 
     private var parameters: [String: [String: Any]] {
         let session = ["type": "string", "description": "The session's id from list_sessions"]
+        let folder = ["type": "string", "description": "Absolute path; default your own folder"]
+        let agent: [String: Any] = ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"]
+        let name = ["type": "string", "description": "Shown in the sidebar"]
         return switch self {
         case .listSessions: [:]
         case .readOutput: ["session": session, "lines": ["type": "integer", "description": "How many (default 100)"]]
         case .newSession: [
-            "folder": ["type": "string", "description": "Absolute path; default your own folder"],
-            "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
+            "folder": folder, "agent": agent, "name": name,
             "prompt": ["type": "string", "description": "The agent's first task, or a command for a shell"],
-            "name": ["type": "string", "description": "Shown in the sidebar"],
             "branch": ["type": "string"],
             "base": ["type": "string", "description": "Branch a new branch starts at; default main (or master), else the folder's current one"],
         ]
@@ -74,12 +75,10 @@ enum AgentTool: String, CaseIterable {
         case .listAutomations: [:]
         case .deleteAutomation: ["automation": ["type": "string", "description": "The automation's id from list_automations"]]
         case .createAutomation: [
-            "folder": ["type": "string", "description": "Absolute path; default your own folder"],
-            "agent": ["type": "string", "enum": Agent.all.map(\.id) + ["shell"], "description": "Default claude"],
+            "folder": folder, "agent": agent, "name": name,
             "prompt": ["type": "string", "description": "The agent's task each run, or a command for a shell"],
             "model": ["type": "string", "enum": ClaudeCode.models, "description": "Claude's model (default Claude's own)"],
             "effort": ["type": "string", "enum": ClaudeCode.efforts, "description": "Claude's effort (default Claude's own)"],
-            "name": ["type": "string", "description": "Shown in the sidebar"],
             "repeat": ["type": "string", "enum": Automation.Frequency.allCases.map(\.rawValue)],
             "time": ["type": "string", "description": "HH:MM, 24-hour, local time (default 09:00); hourly uses only the minutes"],
             "weekday": ["type": "string", "enum": Self.weekdays, "description": "For weekly (default monday)"],
@@ -177,7 +176,7 @@ extension SessionStore {
             let text = String(decoding: session.terminal.getTerminal().getBufferAsData(), as: UTF8.self)
             var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             while lines.last?.isEmpty == true { lines.removeLast() }
-            return lines.suffix(args["lines"] as? Int ?? 100).joined(separator: "\n")
+            return lines.suffix(max(args["lines"] as? Int ?? 100, 0)).joined(separator: "\n") // suffix traps on < 0
         case .newSession:
             return try json(describe(try await startSession(args, caller: caller), caller: caller))
         case .sendInput:
@@ -203,10 +202,10 @@ extension SessionStore {
             return try json(automations.map(describe))
         case .deleteAutomation:
             let id = args["automation"] as? String ?? ""
-            guard let automation = automations.first(where: { $0.id.uuidString.caseInsensitiveCompare(id) == .orderedSame }) else {
+            guard let uuid = UUID(uuidString: id), automations.contains(where: { $0.id == uuid }) else {
                 throw ToolError(message: "No automation \(id); see list_automations.")
             }
-            deleteAutomation(automation.id)
+            deleteAutomation(uuid)
             return "Deleted."
         }
     }
@@ -330,7 +329,7 @@ extension SessionStore {
 
     private func find(_ args: [String: Any]) throws -> TerminalSession {
         let id = args["session"] as? String ?? ""
-        guard let session = sessions.first(where: { $0.id.uuidString.caseInsensitiveCompare(id) == .orderedSame }) else {
+        guard let session = session(UUID(uuidString: id)) else {
             throw ToolError(message: "No session \(id); see list_sessions.")
         }
         return session
