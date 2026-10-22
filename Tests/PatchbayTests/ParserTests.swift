@@ -84,6 +84,12 @@ struct GitParserTests {
         #expect(lines[2].text == "old")
     }
 
+    @Test func diffLineSeparators() {
+        let lines = Git.parseDiff("@@ -1,2 +1,2 @@\r\n-a\rb\r\n+a\u{2028}@ - b\n c\n")
+        #expect(lines.map(\.kind) == [.hunk, .removed, .added, .context])
+        #expect(lines[1].text == "a\rb")
+    }
+
     @Test func reviewMessage() {
         let lines = Git.parseDiff("@@ -3,2 +3,3 @@\n same\n-old\n+new\n+more\n")
         let comments = [
@@ -147,6 +153,16 @@ struct SmallParserTests {
         try late.write(contentsOf: Data("\t/tmp\n".utf8))
         try append("ShellExec\tls\n")
         #expect(reader.readNewLines() == ["ShellPrompt\t0\t/tmp", "ShellExec\tls"])
+    }
+
+    @Test func takeLines() {
+        var buffer = Data("a\n\nb\npart".utf8)
+        #expect(buffer.takeLines() == [Data("a".utf8), Data(), Data("b".utf8)])
+        #expect(buffer == Data("part".utf8))
+        #expect(buffer.takeLines().isEmpty)
+        buffer += Data("ial\n".utf8)
+        #expect(buffer.takeLines() == [Data("partial".utf8)])
+        #expect(buffer.isEmpty)
     }
 
     @Test func elapsedTime() {

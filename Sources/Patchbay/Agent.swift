@@ -62,13 +62,12 @@ struct Agent: Identifiable, Codable, Hashable {
         get { savedCustom.withLock { $0 } }
         set {
             savedCustom.withLock { $0 = newValue }
-            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Preferences.Keys.customAgents)
+            Preferences.save(newValue, forKey: Preferences.Keys.customAgents)
         }
     }
 
     /// Decoded once: context menus and every shell event look agents up.
-    private static let savedCustom = Mutex(UserDefaults.standard.data(forKey: Preferences.Keys.customAgents)
-        .flatMap { try? JSONDecoder().decode([Agent].self, from: $0) } ?? [])
+    private static let savedCustom = Mutex(Preferences.load([Agent].self, forKey: Preferences.Keys.customAgents) ?? [])
 
     static var all: [Agent] { builtIn + custom }
 

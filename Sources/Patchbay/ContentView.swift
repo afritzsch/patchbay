@@ -11,17 +11,18 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 270, max: 420)
         } detail: {
             Group {
-                if store.mode == .history {
-                    HistoryView()
-                } else if store.showOverview {
-                    OverviewView()
-                } else if let layout = store.layout {
-                    LayoutNodeView(node: layout)
-                        // Terminal colour up to the window top, without a toolbar strip over the panes.
-                        .background(Color(nsColor: Theme.terminalBackground).ignoresSafeArea())
-                        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-                } else {
-                    EmptyStateView()
+                switch store.mode {
+                case .history: HistoryView()
+                case .overview: OverviewView()
+                case .panes:
+                    if let layout = store.layout {
+                        LayoutNodeView(node: layout)
+                            // Terminal colour up to the window top, without a toolbar strip over the panes.
+                            .background(Color(nsColor: Theme.terminalBackground).ignoresSafeArea())
+                            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                    } else {
+                        EmptyStateView()
+                    }
                 }
             }
             .toolbar { toolbar }

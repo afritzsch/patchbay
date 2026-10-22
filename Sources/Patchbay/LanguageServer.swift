@@ -25,12 +25,12 @@ struct LanguageServerConfig: Identifiable, Codable, Hashable {
         get { savedCustom.withLock { $0 } }
         set {
             savedCustom.withLock { $0 = newValue }
-            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Preferences.Keys.customLanguageServers)
+            Preferences.save(newValue, forKey: Preferences.Keys.customLanguageServers)
         }
     }
 
-    private static let savedCustom = Mutex(UserDefaults.standard.data(forKey: Preferences.Keys.customLanguageServers)
-        .flatMap { try? JSONDecoder().decode([LanguageServerConfig].self, from: $0) } ?? [])
+    private static let savedCustom = Mutex(Preferences.load([LanguageServerConfig].self,
+                                                            forKey: Preferences.Keys.customLanguageServers) ?? [])
 
     static func forFile(_ path: String) -> LanguageServerConfig? {
         let file = (path as NSString).lastPathComponent
@@ -221,7 +221,7 @@ enum LSP {
     @ObservationIgnored private var pending: [Int: CheckedContinuation<Data, Error>] = [:]
     /// The text each open document was last sent with, and its version.
     @ObservationIgnored private var documents: [String: (text: String, version: Int)] = [:]
-    @ObservationIgnored var openDocuments: Int { documents.count }
+    var openDocuments: Int { documents.count }
 
     struct Failure: LocalizedError {
         var errorDescription: String?

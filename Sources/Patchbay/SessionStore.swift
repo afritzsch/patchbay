@@ -31,9 +31,8 @@ final class SessionStore {
         didSet { save() }
     }
     /// Sessions started on a schedule (`Automations.swift`).
-    var automations = UserDefaults.standard.data(forKey: Preferences.Keys.automations)
-        .flatMap { try? JSONDecoder().decode([Automation].self, from: $0) } ?? [] {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(automations), forKey: Preferences.Keys.automations) }
+    var automations = Preferences.load([Automation].self, forKey: Preferences.Keys.automations) ?? [] {
+        didSet { Preferences.save(automations, forKey: Preferences.Keys.automations) }
     }
     /// The sessions picked with ⌘- or ⇧-click in the sidebar for a bulk action; empty, never one, otherwise.
     var multiSelection: Set<UUID> = []
@@ -568,13 +567,10 @@ final class SessionStore {
     }
 
     private func restore() {
-        guard let data = UserDefaults.standard.data(forKey: Preferences.Keys.savedSessions),
-              let saved = try? JSONDecoder().decode([SavedSession].self, from: data) else { return }
+        guard let saved = Preferences.load([SavedSession].self, forKey: Preferences.Keys.savedSessions) else { return }
         // Read before creating sessions: each new session saves, which would overwrite it.
-        let savedLayout = UserDefaults.standard.data(forKey: Preferences.Keys.savedLayout)
-            .flatMap { try? JSONDecoder().decode(PaneLayout.self, from: $0) }
-        let savedGroups = UserDefaults.standard.data(forKey: Preferences.Keys.savedGroups)
-            .flatMap { try? JSONDecoder().decode([SessionGroup].self, from: $0) } ?? []
+        let savedLayout = Preferences.load(PaneLayout.self, forKey: Preferences.Keys.savedLayout)
+        let savedGroups = Preferences.load([SessionGroup].self, forKey: Preferences.Keys.savedGroups) ?? []
         let resume = UserDefaults.standard.bool(forKey: Preferences.Keys.resumeClaude)
         for item in saved {
             var agent = item.agentID.flatMap(Agent.named)

@@ -222,11 +222,16 @@ final class EventFileReader {
             let descriptor = open(url.path, O_RDONLY | O_CREAT, 0o644)
             self.handle = descriptor < 0 ? nil : FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         }
-        var lines: [String] = []
-        while let newline = partial.firstIndex(of: UInt8(ascii: "\n")) {
-            lines.append(String(decoding: partial[partial.startIndex..<newline], as: UTF8.self))
-            partial.removeSubrange(partial.startIndex...newline)
-        }
+        return partial.takeLines().map { String(decoding: $0, as: UTF8.self) }
+    }
+}
+
+extension Data {
+    /// Takes the complete lines off the front, without their newlines; an unfinished last line stays.
+    mutating func takeLines() -> [Data] {
+        guard let last = lastIndex(of: UInt8(ascii: "\n")) else { return [] }
+        let lines = self[..<last].split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false).map { Data($0) }
+        self = Data(self[index(after: last)...])
         return lines
     }
 }

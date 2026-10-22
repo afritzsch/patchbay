@@ -130,10 +130,7 @@ struct AutomationSheet: View {
             }
             Section {
                 Picker("Repeat", selection: $automation.frequency) {
-                    Text("Hourly").tag(Automation.Frequency.hourly)
-                    Text("Daily").tag(Automation.Frequency.daily)
-                    Text("Weekdays").tag(Automation.Frequency.weekdays)
-                    Text("Weekly").tag(Automation.Frequency.weekly)
+                    ForEach(Automation.Frequency.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                 }
                 if automation.frequency == .weekly {
                     Picker("On", selection: $automation.weekday) {
