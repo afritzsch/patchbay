@@ -385,8 +385,10 @@ final class TerminalHostView: NSView {
             return draggedSession(info) == nil && !droppedFiles(info).isEmpty ? .center : nil
         }
         let zone = Self.zone(at: convert(info.draggingLocation, from: nil), in: bounds)
-        if let dragged = draggedSession(info) {
-            return dragged == .session(sessionID) ? nil : zone // Dropping a pane on itself does nothing.
+        switch draggedSession(info) {
+        case .session(sessionID), .group: return nil // Dropping a pane on itself, or a group, does nothing.
+        case .session, .external: return zone
+        case nil: break
         }
         // Files: the centre types their paths into the terminal, an edge opens a session for the folder.
         return droppedFiles(info).isEmpty ? nil : zone
@@ -432,7 +434,7 @@ final class TerminalHostView: NSView {
             // After the drag has finished, so the confirmation isn't shown mid-drop.
             DispatchQueue.main.async { store.confirmAndBringIn(external, splitting: target, zone: zone) }
             return true
-        case nil:
+        case .group, nil:
             break
         }
         let files = droppedFiles(sender)

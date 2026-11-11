@@ -48,6 +48,7 @@ struct SidebarView: View {
                     rows(in: group.id)
                 } header: {
                     header(group.name, group: group.id)
+                        .overlay { RowDragSource(payload: .group(group.id), name: group.name, toolTip: nil) }
                         .contextMenu { GroupMenu(group: group) }
                 }
             }
