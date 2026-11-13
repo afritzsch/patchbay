@@ -16,7 +16,8 @@ enum SessionStatus: Equatable {
     case exited(Int32?)
 }
 
-/// Lines in a session's events file: the shell integration's, then Claude Code's hooks.
+/// Lines in a session's events file: the shell integration's, then Claude Code's hooks, then two that only
+/// OpenCode's plugin writes.
 enum SessionEvent: String, CaseIterable {
     case shellExec = "ShellExec"
     case shellPrompt = "ShellPrompt"
@@ -28,8 +29,13 @@ enum SessionEvent: String, CaseIterable {
     case notification = "Notification"
     case stop = "Stop"
     case sessionEnd = "SessionEnd"
+    /// A permission prompt or question was answered (OpenCode plugin only).
+    case agentResumed = "AgentResumed"
+    /// The turn was interrupted or failed, and the agent waits for a prompt (OpenCode plugin only).
+    case agentReady = "AgentReady"
 
-    static let hooks = allCases.filter { $0 != .shellExec && $0 != .shellPrompt }
+    /// The events Claude Code's hook settings are generated from.
+    static let hooks = allCases.filter { ![.shellExec, .shellPrompt, .agentResumed, .agentReady].contains($0) }
 }
 
 /// What a session's shell and agent are doing, worked out from its events. A plain value with no terminal
@@ -50,7 +56,11 @@ struct SessionState: Equatable {
     private(set) var cwd: String
     /// The agent running in the foreground, or nil for a plain shell.
     private(set) var agent: Agent?
-    private(set) var claudeSessionID: String?
+    /// The conversation the user is typing in, as its agent names it (Claude's session ID, OpenCode's `ses_…`), and
+    /// the ID of the agent that owns it. The owner stays when the agent exits, so a conversation never passes for
+    /// another agent's.
+    private(set) var conversationID: String?
+    private(set) var conversationAgentID: String?
     private(set) var lastPrompt: String?
     /// Latest Claude notification, or what a finished command did.
     private(set) var message: String?
@@ -75,13 +85,25 @@ struct SessionState: Equatable {
     }
 
     /// A session started with an agent counts as running it before its first event, so an early save keeps it.
-    init(cwd: String, agent: Agent? = nil, claudeSessionID: String? = nil) {
+    init(cwd: String, agent: Agent? = nil, conversationID: String? = nil) {
         self.cwd = cwd
         self.agent = agent
-        self.claudeSessionID = claudeSessionID
+        self.conversationID = conversationID
+        conversationAgentID = conversationID == nil ? nil : agent?.id
     }
 
     var isClaude: Bool { agent == .claude }
+    var isOpenCode: Bool { agent == .opencode }
+
+    /// The conversation `agent` owns here, if there is one (nil for another agent's).
+    func conversation(of agent: Agent) -> String? {
+        conversationAgentID == agent.id ? conversationID : nil
+    }
+
+    /// The conversation of the agent running now, which is the one that can be resumed or is open.
+    var runningConversationID: String? {
+        agent.flatMap { conversation(of: $0) }
+    }
 
     var needsAttention: Bool {
         status == .agentNeedsInput || unseen
@@ -147,7 +169,7 @@ struct SessionState: Equatable {
         case .sessionStart:
             let json = HookPayload(payload)
             hookEvent()
-            claudeSessionID = json["session_id"] ?? claudeSessionID
+            rememberConversation(json, fromPrompt: false)
             if let dir = json["cwd"] { cwd = dir }
             setStatus(promptPending ? .agentWorking : .agentReady, at: now)
             promptPending = false
@@ -158,7 +180,7 @@ struct SessionState: Equatable {
             var effects: [Effect] = []
             if let prompt = json["prompt"]?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
                 lastPrompt = prompt
-                claudeSessionID = json["session_id"] ?? claudeSessionID
+                rememberConversation(json, fromPrompt: true)
                 effects.append(.record(.prompt, prompt))
             }
             promptStarted = now
@@ -182,17 +204,19 @@ struct SessionState: Equatable {
         case .permissionRequest:
             hookEvent()
             asksApproval = true
+            // OpenCode's plugin sends the same keys ("tool_name" is its permission action, "command" the resource).
             approvalRequest = ClaudeCode.requestSummary(HookPayload(payload))
             setStatus(.agentNeedsInput, at: now)
             return []
         case .notification:
             let json = HookPayload(payload)
             hookEvent()
-            if ClaudeCode.isIdleReminder(json) {
+            if isClaude, ClaudeCode.isIdleReminder(json) {
                 if status != .agentDone, status != .agentNeedsInput, runningSubagents == 0 { setStatus(.agentReady, at: now) }
                 return []
             }
-            let text = (asksApproval ? approvalRequest.map { "Allow \($0)?" } : nil) ?? json["message"] ?? "Claude needs your attention"
+            let text = (asksApproval ? approvalRequest.map { "Allow \($0)?" } : nil) ?? json["message"]
+                ?? "\(agent?.name ?? Agent.claude.name) needs your attention"
             message = text
             setStatus(.agentNeedsInput, at: now)
             return [.record(.agentNeedsInput, text), .alert(text)]
@@ -205,9 +229,24 @@ struct SessionState: Equatable {
             promptStarted = nil
             if !visible() {
                 unseen = true
-                effects.append(.alert(lastPrompt.map { "Done: \($0)" } ?? "Claude finished"))
+                effects.append(.alert(lastPrompt.map { "Done: \($0)" } ?? "\(agent?.name ?? Agent.claude.name) finished"))
             }
             return effects
+        case .agentResumed:
+            hookEvent()
+            answered(now: now)
+            return []
+        case .agentReady:
+            hookEvent()
+            clearTurn()
+            promptStarted = nil
+            setStatus(.agentReady, at: now)
+            // An interruption is the user's own doing; a failure they may not have seen.
+            guard let text = HookPayload(payload)["message"], !text.isEmpty else { return [] }
+            message = text
+            guard !visible() else { return [] }
+            unseen = true
+            return [.alert(text)]
         case .sessionEnd:
             agentGone()
             setStatus(.idle, at: now)
@@ -216,10 +255,37 @@ struct SessionState: Equatable {
     }
 
     /// A hook event: an agent with hooks is running, and its hooks (not the shell's command line) now track it.
-    /// Only Claude's hooks are installed, so it's Claude unless the command line started another agent with hooks.
+    /// The plugin of OpenCode and the hooks of Claude run inside their commands, so `ShellExec` has already named
+    /// the agent. When it didn't (`cd app && opencode`), the words of the command line say which one it is,
+    /// and it's Claude otherwise.
     private mutating func hookEvent() {
-        if agent?.hasHooks != true { agent = .claude }
+        if agent?.hasHooks != true {
+            let words = command?.line.split { !$0.isLetter && !$0.isNumber && $0 != "-" && $0 != "_" }.map(String.init) ?? []
+            agent = words.contains(Agent.opencode.command) && !words.contains(Agent.claude.command) ? .opencode : .claude
+        }
         command = nil
+    }
+
+    /// The conversation ID of a hook payload. Claude's `SessionStart` and prompts carry its session ID. OpenCode's
+    /// plugin puts the ID of whichever session an event belongs to in the payload, including a subagent's child
+    /// session (permission and question events), so only a prompt counts: it's the session the user typed in, and
+    /// the TUI can switch sessions, so the latest prompt wins.
+    private mutating func rememberConversation(_ json: HookPayload, fromPrompt: Bool) {
+        guard let agent, let id = json["session_id"] else { return }
+        if agent == .claude || (agent == .opencode && fromPrompt) {
+            conversationID = id
+            conversationAgentID = agent.id
+        }
+    }
+
+    /// A permission prompt or question was answered: the agent goes on working.
+    private mutating func answered(now: Date) {
+        if status == .agentNeedsInput {
+            message = nil
+            asksApproval = false
+            approvalRequest = nil
+            setStatus(.agentWorking, at: now)
+        }
     }
 
     private mutating func agentGone() {
@@ -253,8 +319,9 @@ struct SessionState: Equatable {
 
     /// A working session that has been silent for a while was interrupted and is waiting for the user.
     /// The silence counts from the last output or the status change, whichever came later.
+    /// Not for OpenCode: its plugin reports interruptions, and a long model call is silent.
     mutating func checkForSilence(lastOutput: Date, now: Date = Date()) {
-        if status == .agentWorking, runningSubagents == 0,
+        if status == .agentWorking, runningSubagents == 0, !isOpenCode,
            now.timeIntervalSince(max(lastOutput, statusSince)) > ClaudeCode.interruptedAfterSilence {
             currentTool = nil
             setStatus(.agentReady, at: now)
@@ -279,12 +346,9 @@ struct SessionState: Equatable {
 
     /// Answering a permission prompt: either a tool runs (PostToolUse follows) or Claude stops, which the
     /// silence check picks up.
+    /// OpenCode's plugin reports the answer (`AgentResumed`), so a keypress in its question form isn't taken for one.
     mutating func inputSent(now: Date = Date()) {
-        if status == .agentNeedsInput {
-            message = nil
-            asksApproval = false
-            setStatus(.agentWorking, at: now)
-        }
+        if !isOpenCode { answered(now: now) }
     }
 
     mutating func bellRang(visible: Bool) -> [Effect] {

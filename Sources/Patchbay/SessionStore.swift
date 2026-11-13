@@ -157,14 +157,15 @@ final class SessionStore {
     /// `select`: focus it (an agent's `new_session` doesn't, so the user's focus stays where it is).
     @discardableResult
     func newSession(id: UUID = UUID(), directory: String, name: String? = nil, agent: Agent?, prompt: String? = nil,
-                    setup: String? = nil, resumeClaudeID: String? = nil, claudeArgs: [String] = [], restoring: Bool = false,
+                    setup: String? = nil, resumeID: String? = nil, claudeArgs: [String] = [], restoring: Bool = false,
                     select: Bool = true, splitting target: UUID? = nil, zone: DropZone = .right) -> TerminalSession {
-        let resume = resumeClaudeID.map { ["--resume", $0] } ?? []
-        var command = agent?.commandLine(arguments: resume + claudeArgs, prompt: prompt)
+        // The ID belongs to `agent` (Claude's session or OpenCode's); an agent that can't resume has none.
+        let resumeID = agent?.resumesConversations == true ? resumeID : nil
+        var command = agent?.commandLine(resuming: resumeID, arguments: claudeArgs, prompt: prompt)
         if let setup { command = [setup, command].compactMap { $0 }.joined(separator: " && ") }
         let dir = FileManager.default.fileExists(atPath: directory) ? directory : NSHomeDirectory()
         let session = TerminalSession(id: id, directory: dir, name: name, initialCommand: command, agent: agent,
-                                      claudeSessionID: resumeClaudeID, fontSize: fontSize)
+                                      conversationID: resumeID, fontSize: fontSize)
         session.isVisible = { [weak self, weak session] in
             guard let self, let session else { return false }
             // In the overview, only the card being worked in counts; the others are small and easy to miss.
@@ -192,7 +193,7 @@ final class SessionStore {
             } else if selectedID == nil { // Nothing on screen to keep: show it rather than an empty window.
                 selectedID = session.id
             }
-            record(.sessionOpened, session, text: agent.map { resumeClaudeID != nil ? "Resumed Claude conversation" : "Started \($0.name)" } ?? "Opened shell")
+            record(.sessionOpened, session, text: agent.map { resumeID != nil ? "Resumed \($0 == .claude ? "Claude" : $0.name) conversation" : "Started \($0.name)" } ?? "Opened shell")
         }
         save()
         return session
@@ -201,7 +202,8 @@ final class SessionStore {
     func record(_ kind: HistoryKind, _ session: TerminalSession, text: String, exitCode: Int? = nil, duration: Double? = nil) {
         history.record(HistoryEntry(kind: kind, sessionID: session.id, sessionName: session.displayName,
                                     directory: session.cwd, text: text, agent: session.agent?.name,
-                                    claudeSessionID: session.claudeSessionID,
+                                    conversationID: session.conversationID,
+                                    conversationAgentID: session.conversationAgentID,
                                     exitCode: exitCode, duration: duration))
     }
 
@@ -263,10 +265,11 @@ final class SessionStore {
         }
     }
 
-    /// Whether a Claude conversation is open in a session here or in another terminal; resuming it a second
-    /// time would corrupt it.
-    func isRunning(claudeConversation id: String) -> Bool {
-        sessions.contains { $0.isClaude && $0.claudeSessionID == id } || externalSessions.contains { $0.sessionID == id }
+    /// Whether a conversation of `agent` is open in a session here (or, for Claude, in another terminal); resuming
+    /// it a second time would corrupt it.
+    func isRunning(conversation id: String, of agent: Agent) -> Bool {
+        sessions.contains { $0.agent == agent && $0.runningConversationID == id }
+            || (agent == .claude && externalSessions.contains { $0.sessionID == id })
     }
 
     @ObservationIgnored private var movingPIDs: Set<pid_t> = []
@@ -282,7 +285,7 @@ final class SessionStore {
             guard ended else { NSSound.beep(); return } // Resuming while it still runs would corrupt the conversation.
             let target = target.flatMap { self.layout?.contains($0) == true ? $0 : nil }
             let session = self.newSession(directory: external.cwd, agent: .claude,
-                                          resumeClaudeID: external.hasTranscript ? external.sessionID : nil,
+                                          resumeID: external.hasTranscript ? external.sessionID : nil,
                                           claudeArgs: external.carriedArgs, splitting: target, zone: zone)
             self.record(.movedIn, session, text: "Moved in from \(external.hostApp ?? "another terminal")")
         }
@@ -538,15 +541,22 @@ final class SessionStore {
 
     // MARK: - Persistence
 
-    private struct SavedSession: Codable {
+    struct SavedSession: Codable {
         var id: UUID?
         var name: String?
         var directory: String
-        /// The agent running in it, restored by starting it again (Claude resumes `claudeSessionID` when there's a conversation).
+        /// The agent running in it, restored by starting it again (Claude and OpenCode resume `conversationID`).
         var agentID: String?
-        var claudeSessionID: String?
+        /// The conversation of `agentID`. Stored under the key `claudeSessionID` that earlier releases wrote, so
+        /// their saved sessions still decode.
+        var conversationID: String?
         var groupID: UUID?
         var startedBy: UUID?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, directory, agentID, groupID, startedBy
+            case conversationID = "claudeSessionID"
+        }
     }
 
     @ObservationIgnored private var lastSaved: [Data?] = []
@@ -554,7 +564,7 @@ final class SessionStore {
     func save() {
         let saved = sessions.filter(\.isAlive).map {
             SavedSession(id: $0.id, name: $0.customName, directory: $0.cwd, agentID: $0.agent?.id,
-                         claudeSessionID: $0.isClaude ? $0.claudeSessionID : nil, groupID: $0.groupID,
+                         conversationID: $0.runningConversationID, groupID: $0.groupID,
                          startedBy: $0.startedBy)
         }
         let state = [try? JSONEncoder().encode(saved), layout.flatMap { try? JSONEncoder().encode($0) },
@@ -574,10 +584,10 @@ final class SessionStore {
         let resume = UserDefaults.standard.bool(forKey: Preferences.Keys.resumeClaude)
         for item in saved {
             var agent = item.agentID.flatMap(Agent.named)
-            if agent == .claude, !resume { agent = nil }
-            let claudeID = item.claudeSessionID.flatMap { resume && ClaudeTranscripts.exist(for: $0) ? $0 : nil }
+            if agent?.resumesConversations == true, !resume { agent = nil }
             let session = newSession(id: item.id ?? UUID(), directory: item.directory, name: item.name,
-                                     agent: agent, resumeClaudeID: claudeID, restoring: true)
+                                     agent: agent, resumeID: Self.restorableConversation(item.conversationID, of: agent, resume: resume),
+                                     restoring: true)
             session.groupID = item.groupID
             session.startedBy = item.startedBy
         }
@@ -585,6 +595,18 @@ final class SessionStore {
         tidyGroups()
         layout = savedLayout?.keeping(Set(sessions.map(\.id)))
         selectedID = layout?.sessionIDs.first ?? sessions.first?.id
+    }
+
+    /// The conversation to resume when restoring a session of `agent`. Claude only has one a transcript backs
+    /// (resuming a conversation nobody typed into fails); OpenCode's `--session` creates the session if it's missing.
+    nonisolated static func restorableConversation(_ id: String?, of agent: Agent?, resume: Bool,
+                                                   claudeTranscriptExists: (String) -> Bool = ClaudeTranscripts.exist) -> String? {
+        guard resume, let id else { return nil }
+        switch agent {
+        case .claude: return claudeTranscriptExists(id) ? id : nil
+        case .opencode: return id
+        default: return nil
+        }
     }
 
     private func rememberDirectory(_ dir: String) {

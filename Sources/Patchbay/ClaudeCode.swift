@@ -37,8 +37,9 @@ enum ClaudeCode {
     /// The terminal title before Claude has a task to name it after.
     static let untitled = "Claude Code"
 
-    /// Tools that run a subagent, which can be quiet for a long time while it works.
-    static func isSubagentTool(_ name: String?) -> Bool { name == "Task" || name == "Agent" }
+    /// Tools that run a subagent, which can be quiet for a long time while it works. OpenCode's plugin reports
+    /// its subagents (child sessions) as a "task" tool.
+    static func isSubagentTool(_ name: String?) -> Bool { name == "Task" || name == "Agent" || name == "task" }
 
     /// The reminder Claude sends some time after a finished turn, as opposed to a question for the user.
     static func isIdleReminder(_ notification: HookPayload) -> Bool {

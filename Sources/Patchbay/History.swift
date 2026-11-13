@@ -40,10 +40,24 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     let text: String
     /// The name of the agent running in the session; missing in entries from before it was recorded.
     var agent: String?
-    var claudeSessionID: String?
+    /// The agent's conversation ID (stored as `claudeSessionID`, the key older entries use) and the ID of the agent
+    /// it belongs to; entries without an owner are Claude's.
+    var conversationID: String?
+    var conversationAgentID: String?
     var exitCode: Int?
     /// Seconds a command or the agent's turn took.
     var duration: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, kind, sessionID, sessionName, directory, text, agent, exitCode, duration
+        case conversationID = "claudeSessionID"
+        case conversationAgentID
+    }
+
+    /// The conversation as the agent `agent` knows it, if the entry has one of that agent's.
+    func conversation(of agent: Agent) -> String? {
+        (conversationAgentID ?? Agent.claude.id) == agent.id ? conversationID : nil
+    }
 }
 
 /// The activity history, kept as JSON lines in Application Support and appended to as things happen.
