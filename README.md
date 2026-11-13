@@ -1,6 +1,6 @@
 # Patchbay
 
-A Mac app for running several Claude Code sessions (and Codex, Gemini, Mistral Vibe, other agents and plain shells) side by side,
+A Mac app for running several Claude Code sessions (and OpenCode, Codex, Gemini, Mistral Vibe, other agents and plain shells) side by side,
 with a sidebar that shows what each one is doing.
 
 ![Patchbay with three Claude Code sessions (working, waiting for permission, done) and a dev server](docs/screenshot.png)
@@ -31,7 +31,7 @@ with a sidebar that shows what each one is doing.
   resume a closed conversation or rerun a command.
 - **Claude usage**: your plan's 5-hour and weekly limits at the bottom of the sidebar (Pro/Max). Claude Code only
   hands these to its status line, so point `statusLine` in `~/.claude/settings.json` at the app's `statusline.sh`.
-- **Restore**: on relaunch the layout, folders and Claude conversations come back.
+- **Restore**: on relaunch the layout, folders and Claude and OpenCode conversations come back.
 
 ## Build & install
 
@@ -87,6 +87,15 @@ Nothing in your own config is modified. Each session's zsh loads your startup fi
 in `~/Library/Application Support/Patchbay/`, which reports commands, exit codes and the directory, and starts
 `claude` with the app's hooks added. The hooks append events to a file per session that the app reads. Esc in
 Claude fires no hook, so a working session that's silent for 8 s counts as waiting again.
+
+OpenCode reports through a small plugin of the app's instead of hooks. The `opencode` function in each session's zsh
+starts it with `--standalone` (a private server per pane, so the plugin sees only that pane's sessions) and loads the
+plugin through `OPENCODE_CONFIG_CONTENT`, which OpenCode merges with your own config. Two things to know:
+- A `--standalone` session isn't live in other OpenCode clients (the desktop app, `opencode` in another terminal) while
+  it runs, and each OpenCode pane runs its own server process. It is stored in the same database, so
+  `opencode --session <id>` resumes it anywhere.
+- If you already set `OPENCODE_CONFIG_CONTENT` yourself, or pass `--server` or `--standalone`, the function leaves
+  `opencode` alone and that session falls back to output-based status, like the agents below.
 
 Other agents have no hooks: they show *Working* while output flows, and permission prompts are recognised by their
 text on screen (set per agent in Settings).

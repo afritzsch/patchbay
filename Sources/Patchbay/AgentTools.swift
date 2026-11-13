@@ -212,13 +212,13 @@ extension SessionStore {
 
     /// Opens the session another app asked for, focused and in front. A conversation already open here is focused.
     private func open(_ request: OpenRequest) throws -> TerminalSession {
-        let open = request.resume.flatMap { id in sessions.first { $0.isClaude && $0.claudeSessionID == id } }
+        let open = request.resume.flatMap { id in sessions.first { $0.isClaude && $0.runningConversationID == id } }
         if let id = request.resume, open == nil {
-            guard !isRunning(claudeConversation: id) else { throw ToolError(message: "\(id) is open in another terminal") }
+            guard !isRunning(conversation: id, of: .claude) else { throw ToolError(message: "\(id) is open in another terminal") }
             guard ClaudeTranscripts.exist(for: id) else { throw ToolError(message: "No Claude conversation \(id)") }
         }
         let session = open ?? newSession(directory: request.folder, name: request.name, agent: .claude,
-                                         prompt: request.prompt, resumeClaudeID: request.resume)
+                                         prompt: request.prompt, resumeID: request.resume)
         show(session.id)
         NSApp.activate()
         AppDelegate.shared?.mainWindow?.makeKeyAndOrderFront(nil)

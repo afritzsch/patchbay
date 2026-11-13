@@ -212,12 +212,14 @@ private struct HistoryRow: View {
         }
     }
 
-    /// The Claude conversation can be resumed when nothing runs it, here or in another terminal.
-    private var canResume: Bool {
-        guard let id = entry.claudeSessionID, [.prompt, .agentFinished, .agentNeedsInput].contains(entry.kind) else {
-            return false
-        }
-        return !store.isRunning(claudeConversation: id) && ClaudeTranscripts.exist(for: id)
+    /// The agent whose conversation the entry holds and can be resumed, if it can: nothing runs it, here or (for
+    /// Claude) in another terminal, and Claude has its transcript. OpenCode's `--session` makes one that's missing.
+    private var resumable: (agent: Agent, id: String)? {
+        guard let agent = Agent.named(entry.conversationAgentID ?? Agent.claude.id), agent.resumesConversations,
+              let id = entry.conversation(of: agent), [.prompt, .agentFinished, .agentNeedsInput].contains(entry.kind),
+              !store.isRunning(conversation: id, of: agent), agent != .claude || ClaudeTranscripts.exist(for: id)
+        else { return nil }
+        return (agent, id)
     }
 
     @ViewBuilder
@@ -225,9 +227,9 @@ private struct HistoryRow: View {
         if session != nil {
             Button("Go to Session") { goToSession() }
         }
-        if canResume, let id = entry.claudeSessionID {
+        if let (agent, id) = resumable {
             Button("Resume This Conversation") {
-                store.newSession(directory: entry.directory, name: entry.sessionName, agent: .claude, resumeClaudeID: id)
+                store.newSession(directory: entry.directory, name: entry.sessionName, agent: agent, resumeID: id)
             }
         }
         if entry.kind == .command, let session, !session.isBusy {

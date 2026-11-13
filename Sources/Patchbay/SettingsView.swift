@@ -15,7 +15,7 @@ struct SettingsView: View {
         @Bindable var store = store
         Form {
             Toggle("Reopen sessions on launch", isOn: $restoreSessions)
-            Toggle("Resume Claude conversations when reopening", isOn: $resumeClaude)
+            Toggle("Resume Claude and OpenCode conversations when reopening", isOn: $resumeClaude)
                 .disabled(!restoreSessions)
             Toggle("Notify when an agent needs input or finishes", isOn: $notify)
             Toggle("Let Claude start and direct other sessions", isOn: $agentTools)
@@ -53,7 +53,7 @@ struct SettingsView: View {
                     }
                 }
                 Button("Add Agent") { customAgents.append(Agent(id: UUID().uuidString, name: "", command: "")) }
-                Text("Codex, Gemini and Mistral Vibe are built in. Any command added here shows as working while it runs. "
+                Text("OpenCode, Codex, Gemini and Mistral Vibe are built in. Any command added here shows as working while it runs. "
                      + "With text from its permission prompt, Patchbay sees it asking and can answer with the keys "
                      + "given (esc and enter stand for those keys).")
                     .foregroundStyle(.secondary)

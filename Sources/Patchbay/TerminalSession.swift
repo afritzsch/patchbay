@@ -44,10 +44,10 @@ final class TerminalSession: Identifiable {
     }
 
     init(id: UUID, directory: String, name: String?, initialCommand: String?, agent: Agent?,
-         claudeSessionID: String?, fontSize: CGFloat) {
+         conversationID: String?, fontSize: CGFloat) {
         self.id = id
         self.customName = name
-        state = SessionState(cwd: directory, agent: agent, claudeSessionID: claudeSessionID)
+        state = SessionState(cwd: directory, agent: agent, conversationID: conversationID)
         terminal = SessionTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
         terminal.applyStyle(fontSize: fontSize)
         terminal.processDelegate = self

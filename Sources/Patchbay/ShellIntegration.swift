@@ -3,13 +3,16 @@ import Foundation
 /// Files the app keeps in Application Support so the terminals can report back what they are doing:
 ///
 /// - a zsh `ZDOTDIR` wrapper that loads the user's own startup files unchanged, then reports the running
-///   command and working directory, and wraps `claude` so it loads our hook settings;
+///   command and working directory, and wraps `claude` so it loads our hook settings and `opencode` so it loads
+///   our plugin;
 /// - `claude-settings.json`, passed to Claude Code with `--settings`, whose hooks call
 /// - `claude-hook.sh`, which appends each hook event to the session's events file;
 /// - `mcp-config.json`, passed with `--mcp-config`, whose server `patchbay-mcp.sh` connects Claude to the app's
-///   tools (`ControlServer`).
+///   tools (`ControlServer`);
+/// - `opencode-plugin/server.ts`, an OpenCode server plugin that writes the same kind of event lines. It is loaded
+///   through `OPENCODE_CONFIG_CONTENT` (`PATCHBAY_OPENCODE_CONFIG`, set by the `opencode` function).
 ///
-/// The user's own `~/.claude/settings.json` and shell config are never modified.
+/// The user's own `~/.claude/settings.json`, OpenCode config and shell config are never modified.
 enum ShellIntegration {
     /// Named after the app so a second copy (e.g. a test build) doesn't share event files with this one.
     static let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -22,6 +25,8 @@ enum ShellIntegration {
     static let mcpScript = supportDir.appendingPathComponent("patchbay-mcp.sh")
     static let mcpConfig = supportDir.appendingPathComponent("mcp-config.json")
     static let controlSocket = supportDir.appendingPathComponent("control.sock")
+    /// A local plugin directory: OpenCode loads `server.ts` from its root.
+    static let opencodePluginDir = supportDir.appendingPathComponent("opencode-plugin", isDirectory: true)
     /// Claude Code status line (configured in ~/.claude/settings.json); also saves plan usage for the app.
     static let statusLineScript = supportDir.appendingPathComponent("statusline.sh")
 
@@ -41,7 +46,10 @@ enum ShellIntegration {
         try? fm.removeItem(at: eventsDir) // Event files of sessions from a previous run are stale.
         try fm.createDirectory(at: eventsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: zdotDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: opencodePluginDir, withIntermediateDirectories: true)
 
+        try opencodePluginSource.write(to: opencodePluginDir.appendingPathComponent("server.ts"),
+                                       atomically: true, encoding: .utf8)
         try hookScriptSource.write(to: hookScript, atomically: true, encoding: .utf8)
         try mcpScriptSource.write(to: mcpScript, atomically: true, encoding: .utf8)
         try statusLineSource.write(to: statusLineScript, atomically: true, encoding: .utf8)
@@ -86,6 +94,10 @@ enum ShellIntegration {
         env["PATCHBAY_EVENTS_DIR"] = eventsDir.path
         env["PATCHBAY_CLAUDE_SETTINGS"] = claudeSettings.path
         if UserDefaults.standard.bool(forKey: Preferences.Keys.agentTools) { env["PATCHBAY_MCP_CONFIG"] = mcpConfig.path }
+        if let config = try? JSONSerialization.data(withJSONObject: ["plugins": [opencodePluginDir.path]],
+                                                    options: [.withoutEscapingSlashes]) {
+            env["PATCHBAY_OPENCODE_CONFIG"] = String(decoding: config, as: UTF8.self)
+        }
         if shellIsZsh {
             env["PATCHBAY_USER_ZDOTDIR"] = env["ZDOTDIR"]
             env["ZDOTDIR"] = zdotDir.path
@@ -100,6 +112,146 @@ enum ShellIntegration {
     }
 
     // MARK: - Sources
+
+    /// OpenCode's counterpart of the hooks: a server plugin that turns session events into the same
+    /// `Name<TAB>{json}` lines `claude-hook.sh` writes, with Claude-style payload keys, so `SessionState` reads both
+    /// alike. The event types and payloads are OpenCode's V2 (`OpenCode.swift` lists what else is assumed).
+    /// Only root sessions count; a subagent shows up as a running "task" tool.
+    private static let opencodePluginSource = #"""
+    import { appendFileSync } from "node:fs"
+    import { Plugin } from "@opencode/plugin"
+
+    // Patchbay: reports this OpenCode server's session events to the app, one "Name<TAB>{json}" line each, in the
+    // terminal's events file. Does nothing outside a Patchbay terminal. Never throws into OpenCode.
+    const types = [
+      "session.created", "session.execution.started", "session.execution.interrupted", "session.execution.failed",
+      "session.execution.succeeded", "session.inbox.enqueued", "session.tool.input.started", "session.tool.success",
+      "session.tool.failed", "session.idle", "permission.asked", "permission.replied", "form.created", "form.replied", "form.cancelled",
+    ] as const
+
+    export default Plugin.define({
+      id: "patchbay",
+      setup(ctx) {
+        const terminal = process.env.PATCHBAY_SESSION_ID
+        const dir = process.env.PATCHBAY_EVENTS_DIR
+        if (!terminal || !dir) return
+        // OpenCode loads a plugin once per location (directory) and every instance sees the events of all of
+        // them, so only the first, the terminal's own, reports; the others would repeat every event.
+        const shared = globalThis as { patchbayReporting?: boolean }
+        if (shared.patchbayReporting) return
+        shared.patchbayReporting = true
+        const file = `${dir}/${terminal}.events`
+        const emit = (name: string, payload: object) => {
+          try {
+            appendFileSync(file, `${name}\t${JSON.stringify(payload).slice(0, 4000)}\n`)
+          } catch {}
+        }
+        const cut = (text: unknown, length: number) => String(text ?? "").slice(0, length)
+
+        const parents = new Map<string, string | undefined>() // session ID -> parent ID
+        const busyChildren = new Set<string>()
+        const busy = new Set<string>() // root sessions in a turn
+        const toolNames = new Map<string, string>() // tool call ID -> tool name
+        const isChild = async (id: string) => {
+          if (!parents.has(id)) {
+            try {
+              parents.set(id, (await ctx.session.get({ sessionID: id })).parentID ?? undefined)
+            } catch {
+              return false
+            }
+          }
+          return parents.get(id) !== undefined
+        }
+
+        const handle = async (event: any) => {
+          const data = event.data
+          const id: string = data.sessionID ?? data.form?.sessionID
+          const base = { session_id: id }
+          switch (event.type) {
+            case "session.created":
+              parents.set(id, data.parentID)
+              return
+            // A question for the user matters in any session, so a subagent's isn't missed.
+            case "permission.asked": {
+              const resource = data.resources?.[0]
+              const cwd = event.location?.directory ?? ctx.location.directory
+              emit("PermissionRequest", { ...base, tool_name: data.action, command: cut(resource, 1000), cwd })
+              emit("Notification", { ...base, message: cut(data.message ?? `OpenCode asks to ${data.action} ${resource ?? ""}`.trim(), 500) })
+              return
+            }
+            case "form.created":
+              emit("Notification", { ...base, message: cut(data.form.title ?? "OpenCode has a question", 500) })
+              return
+            case "permission.replied":
+            case "form.replied":
+            case "form.cancelled":
+              emit("AgentResumed", base)
+              return
+          }
+
+          if (await isChild(id)) {
+            const done = ["session.idle", "session.execution.succeeded", "session.execution.interrupted",
+                          "session.execution.failed"]
+            if (!done.includes(event.type)) {
+              if (!busyChildren.has(id)) emit("PreToolUse", { ...base, tool_name: "task" })
+              busyChildren.add(id)
+            } else if (busyChildren.delete(id)) {
+              emit("PostToolUse", { ...base, tool_name: "task" })
+            }
+            return
+          }
+
+          switch (event.type) {
+            case "session.execution.started":
+              busy.add(id)
+              return
+            case "session.inbox.enqueued":
+              if (data.item.type === "user") emit("UserPromptSubmit", { ...base, prompt: cut(data.item.payload.text, 2000) })
+              return
+            case "session.tool.input.started":
+              toolNames.set(data.id, data.name)
+              emit("PreToolUse", { ...base, tool_name: data.name })
+              return
+            case "session.tool.success":
+            case "session.tool.failed":
+              emit("PostToolUse", { ...base, tool_name: toolNames.get(data.id) ?? "tool" })
+              toolNames.delete(data.id)
+              return
+            // OpenCode 2.3 ends a turn with session.execution.succeeded and sends no session.idle; both count,
+            // once per turn.
+            case "session.execution.succeeded":
+            case "session.idle":
+              if (busy.delete(id)) emit("Stop", base)
+              return
+            case "session.execution.interrupted":
+              busy.delete(id)
+              emit("AgentReady", base)
+              return
+            case "session.execution.failed":
+              busy.delete(id)
+              emit("AgentReady", { ...base, message: cut(data.error?.message, 500) })
+              return
+          }
+        }
+
+        emit("SessionStart", { cwd: ctx.location.directory })
+        const controller = new AbortController()
+        void (async () => {
+          try {
+            for await (const event of ctx.event.subscribe({ types: [...types], signal: controller.signal })) {
+              try {
+                await handle(event)
+              } catch {}
+            }
+          } catch {}
+        })()
+        return () => {
+          controller.abort()
+          shared.patchbayReporting = false
+        }
+      },
+    })
+    """#
 
     private static let hookScriptSource = #"""
     #!/bin/sh
@@ -197,6 +349,36 @@ enum ShellIntegration {
                 *)
                     # --mcp-config takes several files, so an option must follow it.
                     eval "$_pb_claude ${PATCHBAY_MCP_CONFIG:+--mcp-config \"\$PATCHBAY_MCP_CONFIG\"} --settings \"\$PATCHBAY_CLAUDE_SETTINGS\" \"\$@\"" ;;
+            esac
+        }
+
+        # Same for opencode. Its plugin runs in the server process, so the TUI gets a private server
+        # (--standalone: a child of this shell, which inherits PATCHBAY_*) and the plugin comes in through
+        # OPENCODE_CONFIG_CONTENT, which OpenCode merges with the user's own config.
+        _pb_opencode='command opencode'
+        if (( ${+aliases[opencode]} )); then
+            _pb_opencode=${aliases[opencode]}
+            [[ ${_pb_opencode%% *} == opencode ]] && _pb_opencode="command $_pb_opencode"
+            unalias opencode
+        fi
+        opencode() {
+            case $1 in
+                \#(OpenCode.subcommands.joined(separator: "|")))
+                    eval "$_pb_opencode \"\$@\"" ;;
+                *)
+                    # The user's own choices win. A OPENCODE_CONFIG_CONTENT of theirs can't be merged with ours
+                    # in shell, and --server or --standalone is theirs to decide. Without the plugin the
+                    # session's status falls back to what its output shows.
+                    local _pb_arg
+                    for _pb_arg in "$@"; do
+                        [[ $_pb_arg == (--server|--server=*|--standalone) ]] && { eval "$_pb_opencode \"\$@\""; return; }
+                    done
+                    if [[ -n $OPENCODE_CONFIG_CONTENT || -z $PATCHBAY_OPENCODE_CONFIG ]]; then
+                        eval "$_pb_opencode \"\$@\""
+                    else
+                        # The assignment is part of the evaluated command: before `eval` it wouldn't be exported.
+                        eval "\#(OpenCode.configEnvironmentKey)=\$PATCHBAY_OPENCODE_CONFIG $_pb_opencode \#(OpenCode.standaloneFlag) \"\$@\""
+                    fi ;;
             esac
         }
 
