@@ -39,6 +39,7 @@ private struct AppCommands: Commands {
                 if let session = store.selectedSession { store.confirmAndClose(session) }
             }
             .disabled(store.selectedSession == nil)
+            Button("Delete Unused Worktrees…") { store.confirmAndDeleteUnusedWorktrees() }
         }
         CommandMenu("Pane") {
             Button("Split Right") { store.split(.right) }

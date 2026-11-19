@@ -62,6 +62,28 @@ extension SessionStore {
 
     func confirmAndClose(_ session: TerminalSession) { confirmAndClose([session]) }
 
+    /// Offers to delete the worktrees this app made that no session here or in another terminal is in, such as
+    /// those of sessions closed without deleting theirs.
+    func confirmAndDeleteUnusedWorktrees() {
+        let used = sessions.map(\.cwd) + externalSessions.map(\.cwd)
+        Task {
+            let unused = await inBackground {
+                Git.ownWorktrees().filter { path in !used.contains { $0 == path || $0.hasPrefix(path + "/") } }
+            }
+            guard !unused.isEmpty else {
+                return _ = Ask.choose("No unused worktrees", "A session is in each worktree Patchbay made.", buttons: ["OK"])
+            }
+            let names = unused.map { $0.dropFirst(Git.worktreesFolder.count + 1) }
+            let list = names.prefix(10).joined(separator: ", ") + (names.count > 10 ? " and \(names.count - 10) more" : "")
+            guard Ask.confirm("Delete \(unused.count) unused worktree\(unused.count == 1 ? "" : "s")?",
+                              "No session is in \(list). Their uncommitted changes are lost; a branch with unmerged "
+                              + "commits is kept.", action: "Delete")
+            else { return }
+            let errors = await inBackground { unused.compactMap(Git.removeWorktree) }
+            if !errors.isEmpty { _ = Ask.choose("Couldn't delete every worktree", errors.joined(separator: "\n\n"), buttons: ["OK"]) }
+        }
+    }
+
     func confirmAndBringIn(_ external: ExternalSession, splitting target: UUID?, zone: DropZone) {
         var info = "Claude Code will quit in \(external.hostApp ?? "the other terminal") and the conversation "
             + "continues here (claude --resume)."
