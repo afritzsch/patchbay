@@ -43,7 +43,11 @@ enum AgentTool: String, CaseIterable {
             Waits until a session stops working: its agent finished its turn or needs input, or its shell is back \
             at the prompt. Returns the session; its status says which, or that it is still working after the timeout.
             """
-        case .closeSession: "Closes a session you started. Its worktree, if any, is kept."
+        case .closeSession: """
+            Closes a session you started and deletes its worktree, if new_session made one and no other session \
+            is in it: uncommitted changes there are lost, its branch is kept while it has unmerged commits. Pass \
+            keep_worktree to keep it.
+            """
         case .createAutomation: """
             Schedules a session that Patchbay starts regularly, as new_session would: an agent with a prompt, or a \
             shell running a command, optionally in a new git worktree for each run. It runs only while Patchbay is \
@@ -71,7 +75,7 @@ enum AgentTool: String, CaseIterable {
         ]
         case .sendInput: ["session": session, "text": ["type": "string"], "submit": ["type": "boolean"]]
         case .waitFor: ["session": session, "timeout": ["type": "integer", "description": "Seconds (default 300)"]]
-        case .closeSession: ["session": session]
+        case .closeSession: ["session": session, "keep_worktree": ["type": "boolean", "description": "Default false"]]
         case .listAutomations: [:]
         case .deleteAutomation: ["automation": ["type": "string", "description": "The automation's id from list_automations"]]
         case .createAutomation: [
@@ -194,8 +198,14 @@ extension SessionStore {
             guard let session = session(id) else { return "The session was closed." }
             return try json(describe(session, caller: caller))
         case .closeSession:
-            close(try find(args, startedBy: caller))
-            return "Closed."
+            let session = try find(args, startedBy: caller)
+            let worktree = session.git.flatMap { git in
+                git.isOwnWorktree && !sessions.contains { $0 !== session && $0.git?.root == git.root } ? git.root : nil
+            }
+            close(session)
+            guard let worktree, args["keep_worktree"] as? Bool != true else { return "Closed." }
+            return await inBackground { Git.removeWorktree(worktree) }
+                .map { "Closed, but couldn't delete its worktree: \($0)" } ?? "Closed and deleted its worktree."
         case .createAutomation:
             return try json(describe(try await createAutomation(args, caller: caller)))
         case .listAutomations:

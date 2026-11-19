@@ -106,6 +106,33 @@ struct GitParserTests {
             - b.swift:4 (removed): keep this
             """)
     }
+
+    /// Finds worktrees, one on a branch with a slash, and deletes them: the merged branch goes too, the
+    /// unmerged one stays.
+    @Test func ownWorktrees() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: temp) }
+        let repo = temp + "/repo", worktrees = temp + "/worktrees"
+        func git(_ arguments: String...) throws {
+            let process = try Process.run(URL(fileURLWithPath: "/usr/bin/git"), arguments: ["-C", repo] + arguments)
+            process.waitUntilExit()
+        }
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        try git("init", "-q", "-b", "main")
+        try git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first")
+        try git("worktree", "add", "-q", "-b", "fix/merged", worktrees + "/fix/merged")
+        try git("worktree", "add", "-q", "-b", "unmerged", worktrees + "/unmerged")
+        try git("-C", worktrees + "/unmerged", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                "--allow-empty", "-m", "work")
+
+        let found = Git.ownWorktrees(in: worktrees).map { String($0.dropFirst(worktrees.count + 1)) }.sorted()
+        #expect(found == ["fix/merged", "unmerged"])
+        #expect(Git.ownWorktrees(in: worktrees).compactMap(Git.removeWorktree) == [])
+        #expect(Git.ownWorktrees(in: worktrees).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: repo + "/.git/refs/heads/fix/merged"))
+        #expect(FileManager.default.fileExists(atPath: repo + "/.git/refs/heads/unmerged"))
+        #expect(!FileManager.default.fileExists(atPath: repo + "/.git/worktrees/unmerged"))
+    }
 }
 
 struct SmallParserTests {

@@ -274,9 +274,18 @@ enum Git {
         guard let common = run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: path)
         else { return "\(path) isn't a git worktree." }
         let branch = run(["branch", "--show-current"], in: path) ?? ""
-        if let error = perform(["worktree", "remove", "--force", path], in: common, timeout: 30) { return error }
+        // Deleted here, not by `git worktree remove`: a build folder can hold so many files that git times out.
+        do { try FileManager.default.removeItem(atPath: path) } catch { return error.localizedDescription }
+        _ = perform(["worktree", "prune"], in: common)
         if !branch.isEmpty { _ = perform(["branch", "-d", branch], in: common) }
         return nil
+    }
+
+    /// The worktrees in `worktreesFolder`, at any depth: branch "fix/x" is in "<repo>/fix/x".
+    /// Blocking: call off the main thread.
+    static func ownWorktrees(in folder: String = worktreesFolder) -> [String] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: folder) else { return [] }
+        return entries.contains(".git") ? [folder] : entries.flatMap { ownWorktrees(in: folder + "/" + $0) }
     }
 
     fileprivate static func perform(_ arguments: [String], in directory: String, timeout: TimeInterval = 10) -> String? {
